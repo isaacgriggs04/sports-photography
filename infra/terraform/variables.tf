@@ -101,6 +101,6 @@ variable "gpu_instance_type" {
 
 variable "public_key" {
   type        = string
-  default     = ""
+  default     = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAOjFuC9eJ9afNaD9EavnojdXRDqFoJSIros9pmqcBpo"
   description = "Optional SSH public key for GPU EC2 instance"
 }

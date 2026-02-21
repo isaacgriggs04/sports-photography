@@ -420,7 +420,7 @@ resource "aws_security_group" "gpu_worker" {
 
 resource "aws_instance" "gpu_worker" {
   count                  = var.create_gpu_worker_instance ? 1 : 0
-  ami                    = "ami-0a7d80731ae1b2435" # Deep Learning AMI GPU PyTorch (region-specific; update for your target region)
+  ami                    = "ami-0b907e1072f1dc528" # Deep Learning OSS Nvidia Driver AMI GPU PyTorch 2.9 (Ubuntu 24.04) us-east-2
   instance_type          = var.gpu_instance_type
   subnet_id              = var.subnet_ids[0]
   vpc_security_group_ids = [aws_security_group.gpu_worker[0].id]
