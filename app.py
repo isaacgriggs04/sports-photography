@@ -34,6 +34,16 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 app.secret_key = "sports-photo-prototype-secret"
 
+
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({"status": "ok", "service": "sports-photography-api"}), 200
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
 CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
 CLERK_JWKS_URL = None  # Will be set from token issuer
 _CLERK_JWKS_CACHE = {"keys": None, "fetched_at": 0}
