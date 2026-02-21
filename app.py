@@ -35,11 +35,6 @@ CORS(app)  # Enable CORS for all routes
 app.secret_key = "sports-photo-prototype-secret"
 
 
-@app.route("/", methods=["GET"])
-def root():
-    return jsonify({"status": "ok", "service": "sports-photography-api"}), 200
-
-
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
@@ -138,6 +133,7 @@ def require_auth(f):
 
     return decorated
 BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 PHOTO_DIR = BASE_DIR / "game_photos"
 THUMB_DIR = BASE_DIR / "thumbnails"
 GROUPS_JSON = BASE_DIR / "athlete_groups.json"
@@ -2542,6 +2538,25 @@ def download_purchased_photo(photo_name):
                 mimetype="application/octet-stream",
             )
     return jsonify({"error": "You do not have access to this photo"}), 403
+
+
+@app.route("/", defaults={"path": ""}, methods=["GET"])
+@app.route("/<path:path>", methods=["GET"])
+def serve_frontend(path):
+    """Serve built React app for non-API routes."""
+    if path.startswith("api/"):
+        return jsonify({"error": "Not found"}), 404
+
+    if path:
+        requested = FRONTEND_DIST_DIR / path
+        if requested.exists() and requested.is_file():
+            return send_from_directory(FRONTEND_DIST_DIR, path)
+
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    if index_file.exists():
+        return send_from_directory(FRONTEND_DIST_DIR, "index.html")
+
+    return jsonify({"status": "ok", "service": "sports-photography-api"}), 200
 
 
 if __name__ == "__main__":

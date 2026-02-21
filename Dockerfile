@@ -1,3 +1,12 @@
+FROM node:20-bullseye AS frontend-build
+WORKDIR /frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -15,11 +24,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
-# Install the rest
+# Install Python dependencies
 COPY requirements-api-slim.txt /app/requirements-api-slim.txt
 RUN pip install --no-cache-dir -r /app/requirements-api-slim.txt
 
 COPY . /app
+COPY --from=frontend-build /frontend/dist /app/frontend/dist
 
 EXPOSE 8080
 ENV PORT=8080
