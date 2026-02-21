@@ -1,0 +1,16 @@
+project_name       = "sports-photography"
+environment        = "prod"
+aws_region         = "us-east-2"
+vpc_id             = "vpc-xxxxxxxxxxxxxxxxx"
+subnet_ids         = ["subnet-xxxxxxxxxxxxxxxxx", "subnet-yyyyyyyyyyyyyyyyy"]
+frontend_origin    = "https://your-frontend-domain"
+uploads_bucket_name = ""
+thumbnails_bucket_name = ""
+
+db_password        = "replace-me"
+clerk_secret_key   = "replace-me"
+stripe_secret_key  = "replace-me"
+worker_shared_secret = "replace-me"
+
+# Optional: paste your SSH public key to access GPU worker host
+public_key = ""

@@ -1,0 +1,14 @@
+boto3==1.35.36
+requests==2.32.3
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+Pillow==10.4.0
+torch==2.5.1
+torchvision==0.20.1
+ultralytics==8.3.28
+insightface==0.7.3
+onnxruntime==1.19.2
+torchreid==0.2.5
+hdbscan==0.8.39
+scikit-learn==1.5.2
+paddleocr==2.8.1

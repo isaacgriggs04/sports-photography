@@ -1,0 +1,355 @@
+{
+  "athletes": {
+    "athlete_2": [
+      {
+        "photo": "IMG_4081.jpeg",
+        "bbox_xyxy": [
+          955.0,
+          1458.0,
+          3039.0,
+          5988.0
+        ],
+        "confidence": 0.8562079071998596,
+        "jersey_number": "16",
+        "jersey_confidence": 0.913030743598938
+      },
+      {
+        "photo": "IMG_7277.jpg",
+        "bbox_xyxy": [
+          1647.0,
+          934.0,
+          3410.0,
+          3956.0
+        ],
+        "confidence": 0.9305472373962402,
+        "jersey_number": null,
+        "jersey_confidence": null
+      }
+    ],
+    "athlete_1": [
+      {
+        "photo": "IMG_4236.jpeg",
+        "bbox_xyxy": [
+          895.0,
+          500.0,
+          4359.0,
+          3965.0
+        ],
+        "confidence": 0.9506980776786804,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_6872.jpg",
+        "bbox_xyxy": [
+          2314.0,
+          120.0,
+          5128.0,
+          3951.0
+        ],
+        "confidence": 0.9456093907356262,
+        "jersey_number": "18",
+        "jersey_confidence": 0.9997789859771729
+      },
+      {
+        "photo": "IMG_4270.jpeg",
+        "bbox_xyxy": [],
+        "confidence": 1.0,
+        "jersey_number": null,
+        "jersey_confidence": null
+      }
+    ],
+    "athlete_3": [
+      {
+        "photo": "IMG_4961.jpg",
+        "bbox_xyxy": [
+          2414.0,
+          836.0,
+          3323.0,
+          3268.0
+        ],
+        "confidence": 0.8473508358001709,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_5044.jpeg",
+        "bbox_xyxy": [
+          1799.0,
+          877.0,
+          3302.0,
+          3958.0
+        ],
+        "confidence": 0.9342937469482422,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_5179.jpeg",
+        "bbox_xyxy": [
+          833.0,
+          993.0,
+          3596.0,
+          5949.0
+        ],
+        "confidence": 0.9039313793182373,
+        "jersey_number": "7",
+        "jersey_confidence": 0.7620899081230164
+      },
+      {
+        "photo": "IMG_5901.jpg",
+        "bbox_xyxy": [
+          2852.0,
+          1113.0,
+          4592.0,
+          3952.0
+        ],
+        "confidence": 0.9435503482818604,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_4961.jpeg",
+        "bbox_xyxy": [],
+        "confidence": 1.0,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_5044_1770863353_1.jpeg",
+        "bbox_xyxy": [],
+        "confidence": 1.0,
+        "jersey_number": null,
+        "jersey_confidence": null
+      }
+    ],
+    "athlete_6": [
+      {
+        "photo": "IMG_5333-2.jpg",
+        "bbox_xyxy": [
+          2302.0,
+          266.0,
+          4465.0,
+          3970.0
+        ],
+        "confidence": 0.8629297018051147,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_5435.JPG",
+        "bbox_xyxy": [
+          686.0,
+          453.0,
+          1196.0,
+          2062.0
+        ],
+        "confidence": 0.9357852339744568,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_7554.jpg",
+        "bbox_xyxy": [
+          2044.0,
+          763.0,
+          4299.0,
+          3979.0
+        ],
+        "confidence": 0.9501964449882507,
+        "jersey_number": "2",
+        "jersey_confidence": 0.8182676434516907
+      },
+      {
+        "photo": "IMG_5333.jpeg",
+        "bbox_xyxy": [],
+        "confidence": 1.0,
+        "jersey_number": null,
+        "jersey_confidence": null
+      }
+    ],
+    "athlete_4": [
+      {
+        "photo": "IMG_5568.jpg",
+        "bbox_xyxy": [
+          797.0,
+          2310.0,
+          3459.0,
+          5203.0
+        ],
+        "confidence": 0.9447997808456421,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_5723.jpg",
+        "bbox_xyxy": [
+          1756.0,
+          311.0,
+          4528.0,
+          3946.0
+        ],
+        "confidence": 0.5105304718017578,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_6028.jpg",
+        "bbox_xyxy": [
+          1983.0,
+          799.0,
+          3400.0,
+          3966.0
+        ],
+        "confidence": 0.9467437863349915,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_7505.jpg",
+        "bbox_xyxy": [
+          2672.0,
+          959.0,
+          3884.0,
+          3970.0
+        ],
+        "confidence": 0.9410969614982605,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_5620.jpeg",
+        "bbox_xyxy": [],
+        "confidence": 1.0,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_7916.jpeg",
+        "bbox_xyxy": [],
+        "confidence": 1.0,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_7916_1771106068_2.jpeg",
+        "bbox_xyxy": [
+          2233.0,
+          492.0,
+          4125.0,
+          3968.0
+        ],
+        "confidence": 0.9290268421173096,
+        "jersey_number": null,
+        "jersey_confidence": null
+      }
+    ],
+    "athlete_5": [
+      {
+        "photo": "IMG_5741.jpg",
+        "bbox_xyxy": [
+          2081.0,
+          1044.0,
+          4718.0,
+          3968.0
+        ],
+        "confidence": 0.9585168957710266,
+        "jersey_number": "4",
+        "jersey_confidence": 0.7534524202346802
+      },
+      {
+        "photo": "IMG_6106.jpg",
+        "bbox_xyxy": [
+          2329.0,
+          129.0,
+          3853.0,
+          3975.0
+        ],
+        "confidence": 0.9279850125312805,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_6649.jpg",
+        "bbox_xyxy": [
+          1911.0,
+          926.0,
+          3981.0,
+          3964.0
+        ],
+        "confidence": 0.9546383619308472,
+        "jersey_number": "24",
+        "jersey_confidence": 0.9656476378440857
+      },
+      {
+        "photo": "IMG_7392.jpg",
+        "bbox_xyxy": [
+          1855.0,
+          483.0,
+          3856.0,
+          3948.0
+        ],
+        "confidence": 0.9627443552017212,
+        "jersey_number": null,
+        "jersey_confidence": null
+      },
+      {
+        "photo": "IMG_7440.jpg",
+        "bbox_xyxy": [
+          2496.0,
+          527.0,
+          3624.0,
+          3711.0
+        ],
+        "confidence": 0.924580991268158,
+        "jersey_number": null,
+        "jersey_confidence": null
+      }
+    ]
+  },
+  "unclustered": [
+    {
+      "photo": "IMG_4350.jpeg",
+      "bbox_xyxy": [
+        2199.0,
+        448.0,
+        3770.0,
+        3987.0
+      ],
+      "confidence": 0.9472140073776245,
+      "jersey_number": null,
+      "jersey_confidence": null
+    },
+    {
+      "photo": "IMG_4458.jpeg",
+      "bbox_xyxy": [
+        1391.0,
+        1461.0,
+        2890.0,
+        5367.0
+      ],
+      "confidence": 0.9380397200584412,
+      "jersey_number": null,
+      "jersey_confidence": null
+    },
+    {
+      "photo": "IMG_7862.jpeg",
+      "bbox_xyxy": [
+        1768.0,
+        646.0,
+        3137.0,
+        5712.0
+      ],
+      "confidence": 0.8899065256118774,
+      "jersey_number": null,
+      "jersey_confidence": null
+    }
+  ],
+  "stats": {
+    "images": 30,
+    "detections": 30,
+    "clustered_detections": 27,
+    "clusters": 6,
+    "method": "incremental_append_new_uploads"
+  }
+}
