@@ -10,8 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-api.txt /app/requirements-api.txt
-RUN pip install --no-cache-dir --default-timeout=600 -r /app/requirements-api.txt
+# Install torch + torchvision from PyTorch CPU index (smaller, faster than PyPI)
+RUN pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# Install the rest
+COPY requirements-api-slim.txt /app/requirements-api-slim.txt
+RUN pip install --no-cache-dir -r /app/requirements-api-slim.txt
 
 COPY . /app
 
