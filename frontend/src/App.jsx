@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Search, ChevronRight, Calendar, Camera, ArrowLeft, Trophy, X, Users, Upload, LogIn, LogOut, ShoppingCart, CheckCircle, Download, User, BarChart3, Settings, Instagram, Bell } from 'lucide-react';
 import { SignedIn, SignedOut, SignInButton, useAuth, useClerk, useUser } from '@clerk/clerk-react';
 
-// Use relative /api so Vite proxy forwards to backend; fallback to direct URL if proxy fails
-const API_BASE = '/api';
+// Local: /api (Vite proxy) or 127.0.0.1:8080. Deployed: set VITE_API_BASE to your API URL (e.g. https://your-api.com:8080/api)
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 const API_BASE_FALLBACK = 'http://127.0.0.1:8080/api';
 const API_HOST = '';
 const GUEST_CART_STORAGE_KEY = 'sportspic_cart_guest';

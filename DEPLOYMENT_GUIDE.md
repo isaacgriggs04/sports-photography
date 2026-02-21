@@ -165,16 +165,18 @@ npm run build
 
 ### 5b. Set environment variables for the frontend
 
-Create `.env.production` or set in your hosting provider:
+**Required for Vercel** – In Vercel → Project Settings → Environment Variables, add:
 
-```
-VITE_CLERK_PUBLISHABLE_KEY=pk_live_xxxxx
-VITE_API_BASE=https://your-api-url
-```
+| Variable | Value |
+|----------|-------|
+| `VITE_CLERK_PUBLISHABLE_KEY` | Your Clerk publishable key (e.g. `pk_live_xxxxx`) |
+| `VITE_API_BASE` | Your API base URL **including** `/api` (e.g. `http://1.2.3.4:8080/api`) |
 
-Replace `your-api-url` with:
-- Your ECS public IP + `:8080` for testing, or
-- Your ALB URL if you add one
+Without `VITE_API_BASE`, the frontend will request `/api` on the same domain (your Vercel URL), which returns 404.
+
+Replace the API URL with:
+- Your ECS public IP + `:8080/api` for testing, or
+- Your ALB URL + `/api` if you add one
 
 ### 5c. Deploy
 
