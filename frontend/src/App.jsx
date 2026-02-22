@@ -776,50 +776,54 @@ function App() {
       }
 
       if (presignRes.ok && Array.isArray(presignData.targets) && presignData.targets.length > 0) {
-        const targetByName = new Map();
-        presignData.targets.forEach((t) => targetByName.set(t.filename, t));
+        try {
+          const targetByName = new Map();
+          presignData.targets.forEach((t) => targetByName.set(t.filename, t));
 
-        for (let i = 0; i < pendingFiles.length; i += 1) {
-          const file = pendingFiles[i];
-          const target = targetByName.get(file.name) || presignData.targets.find((t) => t.filename === file.name) || presignData.targets[i];
-          if (!target?.upload_url || !target?.key) {
-            throw new Error(`Missing upload target for ${file.name}`);
+          for (let i = 0; i < pendingFiles.length; i += 1) {
+            const file = pendingFiles[i];
+            const target = targetByName.get(file.name) || presignData.targets.find((t) => t.filename === file.name) || presignData.targets[i];
+            if (!target?.upload_url || !target?.key) {
+              throw new Error(`Missing upload target for ${file.name}`);
+            }
+            const putRes = await fetch(target.upload_url, {
+              method: 'PUT',
+              headers: { 'Content-Type': file.type || 'application/octet-stream' },
+              body: file,
+            });
+            if (!putRes.ok) {
+              throw new Error(`Direct upload failed for ${file.name} (${putRes.status})`);
+            }
           }
-          const putRes = await fetch(target.upload_url, {
-            method: 'PUT',
-            headers: { 'Content-Type': file.type || 'application/octet-stream' },
-            body: file,
+
+          setUploadMessage('Upload complete. Starting cloud clustering...');
+          const completeRes = await fetch(`${API_BASE}/uploads/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({
+              game_id: selectedGame.game_id,
+              school: selectedSchool?.name || '',
+              sport: selectedSport || '',
+              photographer: photographerLabel,
+              price: String(photoPrice ?? '0'),
+              include_in_package: includeInPackage,
+              uploads: presignData.targets.map((t) => ({ filename: t.filename, key: t.key })),
+            }),
           });
-          if (!putRes.ok) {
-            throw new Error(`Direct upload failed for ${file.name} (${putRes.status})`);
+          const completeData = await completeRes.json().catch(() => ({}));
+          if (!completeRes.ok) {
+            throw new Error(completeData?.error || `Cloud finalize failed (${completeRes.status}).`);
           }
-        }
-
-        setUploadMessage('Upload complete. Starting cloud clustering...');
-        const completeRes = await fetch(`${API_BASE}/uploads/complete`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...headers },
-          body: JSON.stringify({
-            game_id: selectedGame.game_id,
-            school: selectedSchool?.name || '',
-            sport: selectedSport || '',
-            photographer: photographerLabel,
-            price: String(photoPrice ?? '0'),
-            include_in_package: includeInPackage,
-            uploads: presignData.targets.map((t) => ({ filename: t.filename, key: t.key })),
-          }),
-        });
-        const completeData = await completeRes.json().catch(() => ({}));
-        if (!completeRes.ok) {
-          setUploadMessage(completeData?.error || `Cloud finalize failed (${completeRes.status}).`);
+          if (completeData?.job_id) {
+            pollCloudJobCompletion(completeData.job_id, selectedGame.game_id, token);
+          } else {
+            setUploadMessage('Photos uploaded. Cloud clustering queued.');
+          }
           return;
+        } catch (cloudErr) {
+          console.error(cloudErr);
+          setUploadMessage('Cloud upload failed. Falling back to direct backend upload...');
         }
-        if (completeData?.job_id) {
-          pollCloudJobCompletion(completeData.job_id, selectedGame.game_id, token);
-        } else {
-          setUploadMessage('Photos uploaded. Cloud clustering queued.');
-        }
-        return;
       }
 
       setUploadMessage('Cloud upload unavailable. Falling back to direct backend upload...');
