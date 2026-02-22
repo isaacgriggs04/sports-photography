@@ -42,6 +42,7 @@ def health():
 CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
 CLERK_JWKS_URL = None  # Will be set from token issuer
 _CLERK_JWKS_CACHE = {"keys": None, "fetched_at": 0}
+_CLERK_JWK_CLIENTS = {}
 
 # Stripe configuration
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
@@ -69,34 +70,29 @@ def _get_clerk_jwks(issuer):
 def _verify_clerk_token(token):
     """Verify a Clerk JWT token and return the decoded payload."""
     try:
-        # Decode header to get kid
-        unverified_header = jwt.get_unverified_header(token)
-        kid = unverified_header.get("kid")
-
         # Decode without verification to get issuer
         unverified_payload = jwt.decode(token, options={"verify_signature": False})
         issuer = unverified_payload.get("iss", "")
-
-        # Fetch JWKS
-        jwks = _get_clerk_jwks(issuer)
-        if not jwks:
+        if not issuer:
+            print("Token verification error: missing issuer")
             return None
 
-        # Find the matching key
-        public_key = None
-        for key in jwks.get("keys", []):
-            if key.get("kid") == kid:
-                public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key))
-                break
-
-        if not public_key:
-            print(f"No matching key found for kid: {kid}")
+        if not hasattr(jwt, "PyJWKClient"):
+            print("Token verification error: PyJWKClient unavailable in installed jwt package")
             return None
+
+        # Resolve and cache JWKS client per issuer
+        jwks_url = f"{issuer}/.well-known/jwks.json"
+        jwk_client = _CLERK_JWK_CLIENTS.get(jwks_url)
+        if jwk_client is None:
+            jwk_client = jwt.PyJWKClient(jwks_url)
+            _CLERK_JWK_CLIENTS[jwks_url] = jwk_client
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
 
         # Verify the token
         payload = jwt.decode(
             token,
-            public_key,
+            signing_key.key,
             algorithms=["RS256"],
             options={"verify_aud": False},  # Clerk doesn't always set aud
         )
@@ -130,6 +126,27 @@ def require_auth(f):
         # Add user info to request context
         request.clerk_user_id = payload.get("sub")
         return f(*args, **kwargs)
+
+    return decorated
+
+
+def require_auth_or_anon_upload(f):
+    """Allow unauthenticated upload testing when ALLOW_ANON_UPLOADS=true."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if os.getenv("ALLOW_ANON_UPLOADS", "false").strip().lower() == "true":
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                request.clerk_user_id = "anon-upload"
+                return f(*args, **kwargs)
+            token = auth_header.split(" ", 1)[1]
+            payload = _verify_clerk_token(token)
+            if not payload:
+                request.clerk_user_id = "anon-upload"
+                return f(*args, **kwargs)
+            request.clerk_user_id = payload.get("sub") or "anon-upload"
+            return f(*args, **kwargs)
+        return require_auth(f)(*args, **kwargs)
 
     return decorated
 BASE_DIR = Path(__file__).resolve().parent
@@ -1713,7 +1730,7 @@ def api_photographer_photos():
 
 
 @app.route("/api/uploads/presign", methods=["POST"])
-@require_auth
+@require_auth_or_anon_upload
 def api_uploads_presign():
     """Create presigned S3 upload URLs for direct browser upload."""
     if not _uploads_in_cloud_enabled():
@@ -1771,7 +1788,7 @@ def api_uploads_presign():
 
 
 @app.route("/api/uploads/complete", methods=["POST"])
-@require_auth
+@require_auth_or_anon_upload
 def api_uploads_complete():
     """Finalize direct uploads, append manifest entries, and enqueue cloud clustering."""
     user_id = getattr(request, "clerk_user_id", None)
@@ -1899,7 +1916,7 @@ def api_internal_job_update(job_id):
 
 
 @app.route("/api/photographer/upload", methods=["POST"])
-@require_auth
+@require_auth_or_anon_upload
 def api_photographer_upload():
     photographer = request.form.get("photographer", "Unknown Photographer").strip()
     school = request.form.get("school", CLUSTER_SCHOOL).strip() or CLUSTER_SCHOOL
@@ -1938,7 +1955,7 @@ def api_photographer_upload():
 
 
 @app.route("/api/game/<int:game_id>/upload", methods=["POST"])
-@require_auth
+@require_auth_or_anon_upload
 def api_game_upload(game_id):
     files = request.files.getlist("photos")
     if not files:
@@ -1976,7 +1993,7 @@ def api_game_upload(game_id):
 
 
 @app.route("/api/claim-uploader", methods=["POST"])
-@require_auth
+@require_auth_or_anon_upload
 def api_claim_uploader():
     """Set the current user as uploader_id and photographer (display name) for manifest entries.
     Updates 'Game Upload' entries and syncs photographer for entries already owned by this user.
