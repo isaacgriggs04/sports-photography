@@ -6,6 +6,7 @@ import { SignedIn, SignedOut, SignInButton, useAuth, useClerk, useUser } from '@
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 const API_BASE_FALLBACK = 'http://127.0.0.1:8080/api';
 const API_HOST = '';
+const ENABLE_CLOUD_UPLOADS = window?.__APP_CONFIG__?.enableCloudUploads === true;
 const GUEST_CART_STORAGE_KEY = 'sportspic_cart_guest';
 const LEGACY_CART_STORAGE_KEY = 'sportspic_cart';
 
@@ -754,75 +755,77 @@ function App() {
         return;
       }
 
-      // Cloud-first flow: presign -> direct PUT upload -> complete
-      const presignRes = await fetch(`${API_BASE}/uploads/presign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify({
-          game_id: selectedGame.game_id,
-          files: pendingFiles.map((file) => ({
-            filename: file.name,
-            content_type: file.type || 'application/octet-stream',
-            size_bytes: file.size,
-          })),
-        }),
-      });
-      const presignText = await presignRes.text();
-      let presignData = {};
-      try {
-        presignData = presignText ? JSON.parse(presignText) : {};
-      } catch {
-        presignData = {};
-      }
-
-      if (presignRes.ok && Array.isArray(presignData.targets) && presignData.targets.length > 0) {
+      if (ENABLE_CLOUD_UPLOADS) {
+        // Optional cloud flow: presign -> direct PUT upload -> complete
+        const presignRes = await fetch(`${API_BASE}/uploads/presign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify({
+            game_id: selectedGame.game_id,
+            files: pendingFiles.map((file) => ({
+              filename: file.name,
+              content_type: file.type || 'application/octet-stream',
+              size_bytes: file.size,
+            })),
+          }),
+        });
+        const presignText = await presignRes.text();
+        let presignData = {};
         try {
-          const targetByName = new Map();
-          presignData.targets.forEach((t) => targetByName.set(t.filename, t));
+          presignData = presignText ? JSON.parse(presignText) : {};
+        } catch {
+          presignData = {};
+        }
 
-          for (let i = 0; i < pendingFiles.length; i += 1) {
-            const file = pendingFiles[i];
-            const target = targetByName.get(file.name) || presignData.targets.find((t) => t.filename === file.name) || presignData.targets[i];
-            if (!target?.upload_url || !target?.key) {
-              throw new Error(`Missing upload target for ${file.name}`);
+        if (presignRes.ok && Array.isArray(presignData.targets) && presignData.targets.length > 0) {
+          try {
+            const targetByName = new Map();
+            presignData.targets.forEach((t) => targetByName.set(t.filename, t));
+
+            for (let i = 0; i < pendingFiles.length; i += 1) {
+              const file = pendingFiles[i];
+              const target = targetByName.get(file.name) || presignData.targets.find((t) => t.filename === file.name) || presignData.targets[i];
+              if (!target?.upload_url || !target?.key) {
+                throw new Error(`Missing upload target for ${file.name}`);
+              }
+              const putRes = await fetch(target.upload_url, {
+                method: 'PUT',
+                headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                body: file,
+              });
+              if (!putRes.ok) {
+                throw new Error(`Direct upload failed for ${file.name} (${putRes.status})`);
+              }
             }
-            const putRes = await fetch(target.upload_url, {
-              method: 'PUT',
-              headers: { 'Content-Type': file.type || 'application/octet-stream' },
-              body: file,
+
+            setUploadMessage('Upload complete. Starting cloud clustering...');
+            const completeRes = await fetch(`${API_BASE}/uploads/complete`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...headers },
+              body: JSON.stringify({
+                game_id: selectedGame.game_id,
+                school: selectedSchool?.name || '',
+                sport: selectedSport || '',
+                photographer: photographerLabel,
+                price: String(photoPrice ?? '0'),
+                include_in_package: includeInPackage,
+                uploads: presignData.targets.map((t) => ({ filename: t.filename, key: t.key })),
+              }),
             });
-            if (!putRes.ok) {
-              throw new Error(`Direct upload failed for ${file.name} (${putRes.status})`);
+            const completeData = await completeRes.json().catch(() => ({}));
+            if (!completeRes.ok) {
+              throw new Error(completeData?.error || `Cloud finalize failed (${completeRes.status}).`);
             }
+            if (completeData?.job_id) {
+              pollCloudJobCompletion(completeData.job_id, selectedGame.game_id, token);
+            } else {
+              setUploadMessage('Photos uploaded. Cloud clustering queued.');
+            }
+            return;
+          } catch (cloudErr) {
+            console.error(cloudErr);
+            setUploadMessage('Cloud upload failed. Falling back to direct backend upload...');
           }
-
-          setUploadMessage('Upload complete. Starting cloud clustering...');
-          const completeRes = await fetch(`${API_BASE}/uploads/complete`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...headers },
-            body: JSON.stringify({
-              game_id: selectedGame.game_id,
-              school: selectedSchool?.name || '',
-              sport: selectedSport || '',
-              photographer: photographerLabel,
-              price: String(photoPrice ?? '0'),
-              include_in_package: includeInPackage,
-              uploads: presignData.targets.map((t) => ({ filename: t.filename, key: t.key })),
-            }),
-          });
-          const completeData = await completeRes.json().catch(() => ({}));
-          if (!completeRes.ok) {
-            throw new Error(completeData?.error || `Cloud finalize failed (${completeRes.status}).`);
-          }
-          if (completeData?.job_id) {
-            pollCloudJobCompletion(completeData.job_id, selectedGame.game_id, token);
-          } else {
-            setUploadMessage('Photos uploaded. Cloud clustering queued.');
-          }
-          return;
-        } catch (cloudErr) {
-          console.error(cloudErr);
-          setUploadMessage('Cloud upload failed. Falling back to direct backend upload...');
         }
       }
 

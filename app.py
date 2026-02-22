@@ -175,6 +175,7 @@ SQS_CLUSTER_QUEUE_URL = os.getenv("SQS_CLUSTER_QUEUE_URL", "").strip()
 CLOUDFRONT_DOMAIN = os.getenv("CLOUDFRONT_DOMAIN", "").strip()
 WORKER_SHARED_SECRET = os.getenv("WORKER_SHARED_SECRET", "").strip()
 DISABLE_HEAVY_CLUSTERING = os.getenv("DISABLE_HEAVY_CLUSTERING", "false").strip().lower() == "true"
+ENABLE_CLOUD_UPLOADS = os.getenv("ENABLE_CLOUD_UPLOADS", "false").strip().lower() == "true"
 THUMBNAIL_SIZE = (300, 300)  # Max dimensions for thumbnails
 
 CLUSTER_GAME_ID = 101
@@ -2577,6 +2578,7 @@ def download_purchased_photo(photo_name):
 def frontend_runtime_config():
     config = {
         "clerkPublishableKey": CLERK_PUBLISHABLE_KEY,
+        "enableCloudUploads": ENABLE_CLOUD_UPLOADS,
     }
     payload = "window.__APP_CONFIG__ = " + json.dumps(config) + ";"
     return app.response_class(payload, mimetype="application/javascript")
