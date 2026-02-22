@@ -2,6 +2,7 @@ Flask==3.0.3
 Flask-Cors==4.0.1
 python-dotenv==1.0.1
 PyJWT==2.9.0
+cryptography==44.0.1
 requests==2.32.3
 stripe==11.1.1
 boto3==1.35.36
