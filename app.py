@@ -174,6 +174,7 @@ S3_THUMBNAILS_BUCKET = os.getenv("S3_THUMBNAILS_BUCKET", "").strip()
 SQS_CLUSTER_QUEUE_URL = os.getenv("SQS_CLUSTER_QUEUE_URL", "").strip()
 CLOUDFRONT_DOMAIN = os.getenv("CLOUDFRONT_DOMAIN", "").strip()
 WORKER_SHARED_SECRET = os.getenv("WORKER_SHARED_SECRET", "").strip()
+DISABLE_HEAVY_CLUSTERING = os.getenv("DISABLE_HEAVY_CLUSTERING", "false").strip().lower() == "true"
 THUMBNAIL_SIZE = (300, 300)  # Max dimensions for thumbnails
 
 CLUSTER_GAME_ID = 101
@@ -1290,7 +1291,7 @@ def _append_photos_as_unclustered(photo_names):
             continue
 
         # First try embedding-based assignment (visual similarity)
-        matched_cluster = _try_assign_by_embedding(name)
+        matched_cluster = None if DISABLE_HEAVY_CLUSTERING else _try_assign_by_embedding(name)
 
         # Fall back to hash matching
         if not matched_cluster:
@@ -1464,6 +1465,20 @@ def _run_reclustering_worker(initial_files):
 
 
 def _start_reclustering_async(new_files=None):
+    if DISABLE_HEAVY_CLUSTERING:
+        files = [f for f in (new_files or []) if f]
+        if files:
+            _append_photos_as_unclustered(files)
+        with CLUSTER_STATE_LOCK:
+            now = int(time.time())
+            CLUSTER_STATE["running"] = False
+            CLUSTER_STATE["last_started_unix"] = now
+            CLUSTER_STATE["last_finished_unix"] = now
+            CLUSTER_STATE["last_success"] = True
+            CLUSTER_STATE["last_error"] = None
+            CLUSTER_QUEUE.clear()
+        return True
+
     with CLUSTER_STATE_LOCK:
         if new_files:
             CLUSTER_QUEUE.extend([f for f in new_files if f])
