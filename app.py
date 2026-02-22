@@ -146,6 +146,7 @@ CARTS_JSON = BASE_DIR / "carts.json"
 CLUSTER_JOBS_JSON = BASE_DIR / "cluster_jobs.json"
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+CLERK_PUBLISHABLE_KEY = os.getenv("VITE_CLERK_PUBLISHABLE_KEY", "")
 INSTAGRAM_APP_ID = os.getenv("INSTAGRAM_APP_ID", "")
 INSTAGRAM_APP_SECRET = os.getenv("INSTAGRAM_APP_SECRET", "")
 INSTAGRAM_REDIRECT_URI = os.getenv("INSTAGRAM_REDIRECT_URI", "")  # e.g. http://localhost:8080/api/instagram/callback
@@ -2538,6 +2539,15 @@ def download_purchased_photo(photo_name):
                 mimetype="application/octet-stream",
             )
     return jsonify({"error": "You do not have access to this photo"}), 403
+
+
+@app.route("/config.js", methods=["GET"])
+def frontend_runtime_config():
+    config = {
+        "clerkPublishableKey": CLERK_PUBLISHABLE_KEY,
+    }
+    payload = "window.__APP_CONFIG__ = " + json.dumps(config) + ";"
+    return app.response_class(payload, mimetype="application/javascript")
 
 
 @app.route("/", defaults={"path": ""}, methods=["GET"])
