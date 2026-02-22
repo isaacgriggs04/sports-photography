@@ -1008,6 +1008,7 @@ def _save_uploaded_files(files, photographer, school, sport, game_id, price=None
     PHOTO_DIR.mkdir(parents=True, exist_ok=True)
 
     uploaded = []
+    skipped = 0
     manifest = _load_uploads_manifest()
     now_ts = int(time.time())
 
@@ -1024,6 +1025,7 @@ def _save_uploaded_files(files, photographer, school, sport, game_id, price=None
         clean_name = secure_filename(file.filename)
         suffix = Path(clean_name).suffix.lower()
         if suffix not in ALLOWED_EXTENSIONS:
+            skipped += 1
             continue
 
         target_path = PHOTO_DIR / clean_name
@@ -1048,7 +1050,7 @@ def _save_uploaded_files(files, photographer, school, sport, game_id, price=None
         manifest.append(entry)
 
     _save_uploads_manifest(manifest)
-    return uploaded
+    return uploaded, skipped
 
 
 def _photo_sha256(photo_name):
@@ -1946,7 +1948,7 @@ def api_photographer_upload():
     if not files:
         return jsonify({"error": "No files provided."}), 400
 
-    uploaded = _save_uploaded_files(
+    uploaded, skipped = _save_uploaded_files(
         files=files,
         photographer=photographer,
         school=school,
@@ -1956,11 +1958,19 @@ def api_photographer_upload():
         include_in_package=include_in_package,
         uploader_id=uploader_id,
     )
-    clustering_started = _start_reclustering_async(uploaded) if uploaded else False
+    if not uploaded:
+        return jsonify({
+            "error": "No supported image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp",
+            "uploaded_count": 0,
+            "skipped_count": skipped,
+        }), 400
+
+    clustering_started = _start_reclustering_async(uploaded)
 
     return jsonify(
         {
             "uploaded_count": len(uploaded),
+            "skipped_count": skipped,
             "uploaded_files": uploaded,
             "school": school,
             "sport": sport,
@@ -1984,7 +1994,7 @@ def api_game_upload(game_id):
     include_in_package = request.form.get("include_in_package", "true").lower() == "true"
     uploader_id = getattr(request, "clerk_user_id", None)
 
-    uploaded = _save_uploaded_files(
+    uploaded, skipped = _save_uploaded_files(
         files=files,
         photographer=photographer,
         school=school,
@@ -1994,12 +2004,20 @@ def api_game_upload(game_id):
         include_in_package=include_in_package,
         uploader_id=uploader_id,
     )
-    clustering_started = _start_reclustering_async(uploaded) if uploaded else False
+    if not uploaded:
+        return jsonify({
+            "error": "No supported image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp",
+            "uploaded_count": 0,
+            "skipped_count": skipped,
+        }), 400
+
+    clustering_started = _start_reclustering_async(uploaded)
     clusters = api_game_clusters(game_id).get_json()
 
     return jsonify(
         {
             "uploaded_count": len(uploaded),
+            "skipped_count": skipped,
             "uploaded_files": uploaded,
             "game_id": game_id,
             "clustering_started": clustering_started,
