@@ -153,6 +153,10 @@ BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 PHOTO_DIR = BASE_DIR / "game_photos"
 THUMB_DIR = BASE_DIR / "thumbnails"
+
+# Ensure local storage dirs exist (needed for Railway/container deployments)
+PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+THUMB_DIR.mkdir(parents=True, exist_ok=True)
 GROUPS_JSON = BASE_DIR / "athlete_groups.json"
 UPLOADS_JSON = BASE_DIR / "uploads_manifest.json"
 PURCHASES_JSON = BASE_DIR / "purchases.json"
@@ -1451,6 +1455,9 @@ def _run_incremental_reclustering(new_files):
 def _run_reclustering_worker(initial_files):
     pending_files = list(initial_files or [])
     result = _run_incremental_reclustering(pending_files) if pending_files else _run_full_reclustering()
+    if pending_files and not result.get("ok", False):
+        # Preserve uploaded photos in the Unknown bucket when clustering fails.
+        _append_photos_as_unclustered(pending_files)
 
     with CLUSTER_STATE_LOCK:
         CLUSTER_STATE["last_finished_unix"] = int(time.time())
