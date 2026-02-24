@@ -14,7 +14,7 @@ ultralytics==8.3.28
 insightface==0.7.3
 onnxruntime==1.19.2
 torchreid==0.2.5
-hdbscan==0.8.39
-scikit-learn==1.5.2
-scipy==1.13.1
+hdbscan==0.8.33
+scikit-learn==1.4.2
+scipy==1.12.0
 paddleocr==2.8.1
