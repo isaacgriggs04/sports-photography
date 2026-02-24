@@ -22,7 +22,7 @@ from debug_embedding_clustering_v2 import (
 def parse_args():
     p = argparse.ArgumentParser(description="Update athlete_groups.json using combined face+body embeddings.")
     p.add_argument("--images-dir", default="game_photos")
-    p.add_argument("--yolo-model", default="yolo26n.pt")
+    p.add_argument("--yolo-model", default="yolo11n.pt")
     p.add_argument("--min-cluster-size", type=int, default=2)
     p.add_argument("--min-samples", type=int, default=1)
     p.add_argument("--merge-combined-cos", type=float, default=0.50)
