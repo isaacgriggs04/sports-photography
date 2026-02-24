@@ -25,7 +25,9 @@ RUN pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
 # Install Python dependencies
+COPY constraints.txt /app/constraints.txt
 COPY requirements-api-slim.txt /app/requirements-api-slim.txt
+ENV PIP_CONSTRAINT=/app/constraints.txt
 RUN pip install --no-cache-dir -r /app/requirements-api-slim.txt
 
 COPY . /app
