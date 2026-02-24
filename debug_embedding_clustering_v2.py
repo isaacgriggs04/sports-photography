@@ -82,7 +82,12 @@ def extract_face_embedding_with_quality(
     Return (embedding, face_det_score, face_area_ratio_in_body).
     If no face is detected, returns (None, None, None).
     """
-    faces = face_app.get(body_crop_bgr)
+    if face_app is None:
+        return None, None, None
+    try:
+        faces = face_app.get(body_crop_bgr)
+    except Exception:
+        return None, None, None
     if not faces:
         return None, None, None
 

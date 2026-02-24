@@ -87,7 +87,12 @@ def extract_face_embedding(
     Try to find a face in the body crop and return ArcFace embedding.
     Returns None if no face is detected.
     """
-    faces = face_app.get(body_crop_bgr)
+    if face_app is None:
+        return None
+    try:
+        faces = face_app.get(body_crop_bgr)
+    except Exception:
+        return None
     if not faces:
         return None
 
@@ -182,23 +187,30 @@ def cluster_players(
 def _build_face_app():
     try:
         from insightface.app import FaceAnalysis
-    except ImportError as exc:
-        raise ImportError(
-            "InsightFace dependency missing. Install with: pip install insightface onnxruntime"
-        ) from exc
+    except Exception as exc:
+        print(f"Face model disabled: {exc}")
+        return None
 
-    providers = ["CPUExecutionProvider"]
-    face_app = FaceAnalysis(name="buffalo_l", providers=providers)
-    face_app.prepare(ctx_id=-1, det_size=(640, 640))
-    return face_app
+    try:
+        providers = ["CPUExecutionProvider"]
+        face_app = FaceAnalysis(name="buffalo_l", providers=providers)
+        face_app.prepare(ctx_id=-1, det_size=(640, 640))
+        return face_app
+    except Exception as exc:
+        print(f"Face model disabled during initialization: {exc}")
+        return None
 
 
 def _build_body_model(device: torch.device):
     try:
         import torchreid
     except ImportError as exc:
+        missing = ""
+        if getattr(exc, "name", None):
+            missing = f" (missing module: {exc.name})"
         raise ImportError(
-            "torchreid is not installed. Install with: pip install torchreid"
+            "torchreid runtime dependency missing"
+            f"{missing}. Install torchreid extras (e.g. gdown, tensorboard)."
         ) from exc
 
     # OSNet for person ReID body embeddings.
