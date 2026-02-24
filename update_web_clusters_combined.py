@@ -8,7 +8,6 @@ import hdbscan
 import numpy as np
 import torch
 from ultralytics import YOLO
-from paddleocr import PaddleOCR
 
 from face_body_cluster_pipeline import _build_body_model, _build_face_app, detect_people, extract_body_embedding
 from debug_embedding_clustering_v2 import (
@@ -256,12 +255,18 @@ def _prototype_reassign_labels(
 
 def _build_number_ocr():
     # Disable online model source checks after first download to reduce startup overhead.
-    return PaddleOCR(
-        lang="en",
-        use_doc_orientation_classify=False,
-        use_doc_unwarping=False,
-        use_textline_orientation=False,
-    )
+    try:
+        from paddleocr import PaddleOCR
+
+        return PaddleOCR(
+            lang="en",
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+        )
+    except Exception as exc:
+        print(f"Jersey OCR disabled: {exc}")
+        return None
 
 
 def _jersey_roi(body_crop_bgr: np.ndarray) -> np.ndarray:
@@ -311,6 +316,9 @@ def extract_jersey_number(body_crop_bgr: np.ndarray, number_ocr):
     OCR jersey number from body crop.
     Returns (number_text_or_None, confidence_or_None).
     """
+    if number_ocr is None:
+        return None, None
+
     roi = _jersey_roi(body_crop_bgr)
     if roi.size == 0:
         return None, None
@@ -323,7 +331,11 @@ def extract_jersey_number(body_crop_bgr: np.ndarray, number_ocr):
         roi = cv2.resize(roi, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
     # Use predict() to avoid deprecated warnings.
-    out = number_ocr.predict(roi)
+    try:
+        out = number_ocr.predict(roi)
+    except Exception as exc:
+        print(f"Jersey OCR inference failed: {exc}")
+        return None, None
     candidates = _extract_number_candidates_from_ocr_output(out)
     if not candidates:
         return None, None
