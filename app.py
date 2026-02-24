@@ -1462,13 +1462,19 @@ def _run_reclustering_worker(initial_files):
     with CLUSTER_STATE_LOCK:
         CLUSTER_STATE["last_finished_unix"] = int(time.time())
         CLUSTER_STATE["last_success"] = bool(result.get("ok", False))
-        CLUSTER_STATE["last_error"] = None if result.get("ok", False) else result.get("stderr", "Cluster update failed.")
+        err = None if result.get("ok", False) else result.get("stderr", "Cluster update failed.")
+        CLUSTER_STATE["last_error"] = err
         if CLUSTER_QUEUE:
             next_files = list(CLUSTER_QUEUE)
             CLUSTER_QUEUE.clear()
         else:
             CLUSTER_STATE["running"] = False
             next_files = []
+
+    if err:
+        print(f"[CLUSTERING ERROR] {err}", flush=True)
+        if result.get("stdout"):
+            print(f"[CLUSTERING STDOUT] {result['stdout'][-1500:]}", flush=True)
 
     if next_files:
         _run_reclustering_worker(next_files)

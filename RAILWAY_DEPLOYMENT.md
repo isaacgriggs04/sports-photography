@@ -40,11 +40,39 @@ If the frontend is on Vercel, set `VITE_API_BASE` to your Railway API URL + `/ap
 VITE_API_BASE=https://your-app.up.railway.app/api
 ```
 
+## Memory (8GB Hobby Plan)
+
+Railway Hobby allows up to 8GB per service, but **you must set it explicitly**:
+
+1. Railway Dashboard → Your service → **Settings**
+2. Under **Resources** or **Deploy**, find **Memory**
+3. Set to **8192 MB** (8GB)
+
+If left at default, the service may use only 512MB–1GB.
+
+## Debugging Clustering Failures
+
+When clustering fails, the error is now logged to stdout. Check **Railway → Deployments → View Logs** after an upload. Look for:
+
+```
+[CLUSTERING ERROR] <actual error message>
+[CLUSTERING STDOUT] <subprocess output>
+```
+
+You can also call `GET /api/clustering/status` – it returns `last_error` when clustering failed.
+
+Common causes:
+- **OOM** – Increase memory in Settings to 8GB
+- **Model download timeout** – First run downloads YOLO/insightface; retry
+- **Missing dependency** – Check logs for `ModuleNotFoundError` or `FileNotFoundError`
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Upload fails / 500 | OOM during clustering | Set `DISABLE_HEAVY_CLUSTERING=true` |
+| Clustering fails silently | Error not surfaced | Check logs for `[CLUSTERING ERROR]` or `/api/clustering/status` |
+| OOM during clustering | Memory limit too low | Set memory to 8192 MB in Railway Settings |
+| Upload fails / 500 | OOM during clustering | Set memory to 8GB, or `DISABLE_HEAVY_CLUSTERING=true` as fallback |
 | Photos disappear after a while | Ephemeral storage | Add Railway Volume or use S3 |
 | CORS errors | Wrong origin | Set `FRONTEND_ORIGIN` to your frontend URL |
 | Images 404 | Directories not created | Fixed in app – `PHOTO_DIR`/`THUMB_DIR` created at startup |
