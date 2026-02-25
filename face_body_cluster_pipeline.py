@@ -38,12 +38,28 @@ def detect_people(
     Detect person bounding boxes in a single image using YOLO.
     Returns a list of detection dicts with body crops and metadata.
     """
-    results = yolo_model.predict(
-        source=image_bgr,
-        classes=[0],  # COCO class 0 = person
-        conf=conf_threshold,
-        verbose=False,
-    )[0]
+    # Normalize input into a predictable format for Ultralytics.
+    if image_bgr is None:
+        return []
+    image_bgr = np.asarray(image_bgr)
+    if image_bgr.ndim == 2:
+        image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_GRAY2BGR)
+    if image_bgr.ndim != 3 or image_bgr.shape[2] != 3:
+        return []
+    if image_bgr.dtype != np.uint8:
+        image_bgr = image_bgr.astype(np.uint8, copy=False)
+    image_bgr = np.ascontiguousarray(image_bgr)
+
+    try:
+        results = yolo_model.predict(
+            source=image_bgr,
+            classes=[0],  # COCO class 0 = person
+            conf=conf_threshold,
+            verbose=False,
+        )[0]
+    except Exception as exc:
+        print(f"YOLO detect failed for {image_path.name}: {exc}")
+        return []
 
     detections: List[Dict] = []
     if results.boxes is None or len(results.boxes) == 0:
