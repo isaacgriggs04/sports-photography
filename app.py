@@ -1638,6 +1638,31 @@ def api_game_clusters(game_id):
     return jsonify(clusters)
 
 
+@app.route("/api/game/<int:game_id>/clusters/unknown", methods=["DELETE"])
+@require_auth
+def api_clear_unknown_cluster(game_id):
+    data = _load_cluster_data()
+    unclustered = data.get("unclustered", [])
+    game_id_str = str(game_id)
+
+    kept = []
+    removed = 0
+    for det in unclustered:
+        photo_name = det.get("photo")
+        if not photo_name:
+            kept.append(det)
+            continue
+        meta = _manifest_lookup().get(photo_name, {})
+        if str(meta.get("game_id", "")).strip() == game_id_str:
+            removed += 1
+            continue
+        kept.append(det)
+
+    data["unclustered"] = kept
+    _write_cluster_data(data)
+    return jsonify({"ok": True, "removed": removed, "game_id": game_id})
+
+
 @app.route("/api/clustering/status", methods=["GET"])
 def api_clustering_status():
     with CLUSTER_STATE_LOCK:

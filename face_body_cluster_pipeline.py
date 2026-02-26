@@ -102,20 +102,35 @@ def detect_people(
         f"dtype={image_bgr.dtype} contiguous={image_bgr.flags['C_CONTIGUOUS']}",
         flush=True,
     )
+    try:
+        _ = cv2.resize(image_bgr, (32, 32), interpolation=cv2.INTER_AREA)
+    except Exception as exc:
+        print(f"OpenCV precheck failed for {image_path.name}: {exc}", flush=True)
+        return []
 
     try:
-        # Primary path: run directly on in-memory OpenCV image.
+        # Primary path: let Ultralytics load from filesystem path.
         results = yolo_model.predict(
-            source=image_bgr,
+            source=str(image_path),
             classes=[0],  # COCO class 0 = person
             conf=conf_threshold,
             verbose=False,
         )[0]
     except Exception:
         try:
-            # Fallback: some Ultralytics/OpenCV combos behave better with list input.
+            # Fallback: downscale and run in-memory to avoid heavy full-res transforms.
+            h, w = image_bgr.shape[:2]
+            max_side = max(h, w)
+            work = image_bgr
+            if max_side > 2048:
+                scale = 2048.0 / max_side
+                work = cv2.resize(
+                    image_bgr,
+                    (max(1, int(w * scale)), max(1, int(h * scale))),
+                    interpolation=cv2.INTER_AREA,
+                )
             results = yolo_model.predict(
-                source=[image_bgr],
+                source=work,
                 classes=[0],
                 conf=conf_threshold,
                 verbose=False,

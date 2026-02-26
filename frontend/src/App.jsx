@@ -8,6 +8,8 @@ const API_BASE_FALLBACK = 'http://127.0.0.1:8080/api';
 const API_HOST = '';
 const GUEST_CART_STORAGE_KEY = 'sportspic_cart_guest';
 const LEGACY_CART_STORAGE_KEY = 'sportspic_cart';
+const MAX_UPLOAD_FILE_MB = 25;
+const ALLOWED_UPLOAD_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
 const getCartStorageKey = (userId) => (
   userId ? `sportspic_cart_user_${userId}` : GUEST_CART_STORAGE_KEY
@@ -709,17 +711,47 @@ function App() {
   };
 
   const handleFileSelection = (event) => {
-    const files = Array.from(event.target.files || []);
+    const rawFiles = Array.from(event.target.files || []);
     if (!selectedGame) {
       setUploadMessage('Open a game first, then upload photos.');
       return;
     }
-    if (!files.length) {
+    if (!rawFiles.length) {
       setUploadMessage('Select at least one photo to upload.');
       return;
     }
+    const maxBytes = MAX_UPLOAD_FILE_MB * 1024 * 1024;
+    const accepted = [];
+    let rejectedExt = 0;
+    let rejectedSize = 0;
+    for (const file of rawFiles) {
+      const name = (file?.name || '').toLowerCase();
+      const dot = name.lastIndexOf('.');
+      const ext = dot >= 0 ? name.slice(dot) : '';
+      if (!ALLOWED_UPLOAD_EXTS.has(ext)) {
+        rejectedExt += 1;
+        continue;
+      }
+      if ((file?.size || 0) > maxBytes) {
+        rejectedSize += 1;
+        continue;
+      }
+      accepted.push(file);
+    }
+    if (!accepted.length) {
+      setUploadMessage(
+        `No valid files selected. Allowed: .jpg, .jpeg, .png, .webp, max ${MAX_UPLOAD_FILE_MB}MB each.`
+      );
+      if (event?.target) event.target.value = '';
+      return;
+    }
+    if (rejectedExt || rejectedSize) {
+      setUploadMessage(
+        `Selected ${accepted.length} file(s). Skipped ${rejectedExt} unsupported and ${rejectedSize} over ${MAX_UPLOAD_FILE_MB}MB.`
+      );
+    }
     // Store files and show the upload modal for price/package options
-    setPendingFiles(files);
+    setPendingFiles(accepted);
     setPhotoPrice('');
     setIncludeInPackage(true);
     setShowUploadModal(true);
