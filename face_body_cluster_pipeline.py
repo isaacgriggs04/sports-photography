@@ -103,12 +103,6 @@ def detect_people(
         flush=True,
     )
     try:
-        _ = cv2.resize(image_bgr, (32, 32), interpolation=cv2.INTER_AREA)
-    except Exception as exc:
-        # Diagnostic only: don't drop the image before YOLO attempts path-based loading.
-        print(f"OpenCV precheck failed for {image_path.name}: {exc}", flush=True)
-
-    try:
         # Primary path: let Ultralytics load from filesystem path.
         results = yolo_model.predict(
             source=str(image_path),
@@ -137,7 +131,20 @@ def detect_people(
             )[0]
         except Exception as exc:
             print(f"YOLO detect failed for {image_path.name}: {exc}")
-            return []
+            # Hard fallback for environments where OpenCV resize bridge is broken.
+            # Keep pipeline running by treating the full frame as one candidate.
+            h, w = image_bgr.shape[:2]
+            if h <= 1 or w <= 1:
+                return []
+            return [
+                {
+                    "image_name": image_path.name,
+                    "image_path": str(image_path),
+                    "bbox_xyxy": [0, 0, w, h],
+                    "confidence": 0.0,
+                    "body_crop_bgr": image_bgr,
+                }
+            ]
 
     detections: List[Dict] = []
     if results.boxes is None or len(results.boxes) == 0:
