@@ -111,40 +111,21 @@ def detect_people(
             verbose=False,
         )[0]
     except Exception:
-        try:
-            # Fallback: downscale and run in-memory to avoid heavy full-res transforms.
-            h, w = image_bgr.shape[:2]
-            max_side = max(h, w)
-            work = image_bgr
-            if max_side > 2048:
-                scale = 2048.0 / max_side
-                work = cv2.resize(
-                    image_bgr,
-                    (max(1, int(w * scale)), max(1, int(h * scale))),
-                    interpolation=cv2.INTER_AREA,
-                )
-            results = yolo_model.predict(
-                source=work,
-                classes=[0],
-                conf=conf_threshold,
-                verbose=False,
-            )[0]
-        except Exception as exc:
-            print(f"YOLO detect failed for {image_path.name}: {exc}")
-            # Hard fallback for environments where OpenCV resize bridge is broken.
-            # Keep pipeline running by treating the full frame as one candidate.
-            h, w = image_bgr.shape[:2]
-            if h <= 1 or w <= 1:
-                return []
-            return [
-                {
-                    "image_name": image_path.name,
-                    "image_path": str(image_path),
-                    "bbox_xyxy": [0, 0, w, h],
-                    "confidence": 0.0,
-                    "body_crop_bgr": image_bgr,
-                }
-            ]
+        print(f"YOLO detect failed for {image_path.name}; using full-frame fallback", flush=True)
+        # Hard fallback for environments where OpenCV resize bridge is broken.
+        # Keep pipeline running by treating the full frame as one candidate.
+        h, w = image_bgr.shape[:2]
+        if h <= 1 or w <= 1:
+            return []
+        return [
+            {
+                "image_name": image_path.name,
+                "image_path": str(image_path),
+                "bbox_xyxy": [0, 0, w, h],
+                "confidence": 0.0,
+                "body_crop_bgr": image_bgr,
+            }
+        ]
 
     detections: List[Dict] = []
     if results.boxes is None or len(results.boxes) == 0:
