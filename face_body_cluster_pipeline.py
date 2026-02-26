@@ -35,6 +35,13 @@ def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarra
     Returns None if unreadable.
     """
     image = preloaded_image
+    if image is not None and not isinstance(image, np.ndarray):
+        print(
+            f"Ignoring non-ndarray preloaded image for {image_path}: type={type(image)}",
+            flush=True,
+        )
+        image = None
+
     if image is None:
         image = cv2.imread(str(image_path))
 
@@ -64,6 +71,12 @@ def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarra
             flush=True,
         )
         return None
+    if image.shape[0] <= 0 or image.shape[1] <= 0:
+        print(
+            f"Image has empty dimensions for {image_path}: shape={image.shape}",
+            flush=True,
+        )
+        return None
     if image.dtype != np.uint8:
         image = image.astype(np.uint8, copy=False)
 
@@ -83,6 +96,12 @@ def detect_people(
     image_bgr = load_image_bgr(image_path, preloaded_image=image_bgr)
     if image_bgr is None:
         return []
+    print(
+        "YOLO input "
+        f"path={image_path} type={type(image_bgr)} shape={image_bgr.shape} "
+        f"dtype={image_bgr.dtype} contiguous={image_bgr.flags['C_CONTIGUOUS']}",
+        flush=True,
+    )
 
     try:
         # Primary path: run directly on in-memory OpenCV image.
