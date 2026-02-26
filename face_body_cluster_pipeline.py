@@ -105,8 +105,8 @@ def detect_people(
     try:
         _ = cv2.resize(image_bgr, (32, 32), interpolation=cv2.INTER_AREA)
     except Exception as exc:
+        # Diagnostic only: don't drop the image before YOLO attempts path-based loading.
         print(f"OpenCV precheck failed for {image_path.name}: {exc}", flush=True)
-        return []
 
     try:
         # Primary path: let Ultralytics load from filesystem path.
