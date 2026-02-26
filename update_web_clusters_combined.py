@@ -9,7 +9,13 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from face_body_cluster_pipeline import _build_body_model, _build_face_app, detect_people, extract_body_embedding
+from face_body_cluster_pipeline import (
+    _build_body_model,
+    _build_face_app,
+    detect_people,
+    extract_body_embedding,
+    load_image_bgr,
+)
 from debug_embedding_clustering_v2 import (
     adaptive_weights,
     body_quality_ok,
@@ -382,7 +388,7 @@ def main():
     print(f"Processing {len(image_paths)} images with combined face+body embeddings...")
     for idx, image_path in enumerate(image_paths, start=1):
         print(f"[{idx}/{len(image_paths)}] {image_path.name}")
-        image = cv2.imread(str(image_path))
+        image = load_image_bgr(image_path)
         if image is None:
             continue
 

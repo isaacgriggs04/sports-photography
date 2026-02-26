@@ -1151,16 +1151,15 @@ def _merge_incremental_clusters(incremental_json_path):
 
 def _extract_embedding_for_photo(photo_name, yolo, face_app, body_model, body_preprocess, device):
     """Extract combined face+body embedding for a photo. Returns None if no detection."""
-    import cv2
     import numpy as np
-    from face_body_cluster_pipeline import detect_people, extract_body_embedding
+    from face_body_cluster_pipeline import detect_people, extract_body_embedding, load_image_bgr
     from debug_embedding_clustering_v2 import extract_face_embedding_with_quality, normalize, adaptive_weights
 
     photo_path = PHOTO_DIR / photo_name
     if not photo_path.exists():
         return None
 
-    image = cv2.imread(str(photo_path))
+    image = load_image_bgr(photo_path)
     if image is None:
         return None
 

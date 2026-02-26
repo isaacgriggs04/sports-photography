@@ -17,6 +17,7 @@ Pipeline:
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -26,6 +27,47 @@ import torch
 from PIL import Image
 from torchvision import transforms
 from ultralytics import YOLO
+
+
+def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarray]:
+    """
+    Load an image as BGR uint8. Tries cv2.imread first, then byte-based decode.
+    Returns None if unreadable.
+    """
+    image = preloaded_image
+    if image is None:
+        image = cv2.imread(str(image_path))
+
+    if image is None:
+        try:
+            with open(image_path, "rb") as f:
+                buf = np.frombuffer(f.read(), dtype=np.uint8)
+            image = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        except Exception:
+            image = None
+
+    if image is None:
+        exists = os.path.exists(image_path)
+        size = os.path.getsize(image_path) if exists else 0
+        print(
+            f"Image load failed: path={image_path} exists={exists} size={size}",
+            flush=True,
+        )
+        return None
+
+    image = np.asarray(image)
+    if image.ndim == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    if image.ndim != 3 or image.shape[2] != 3:
+        print(
+            f"Image shape invalid for {image_path}: shape={getattr(image, 'shape', None)}",
+            flush=True,
+        )
+        return None
+    if image.dtype != np.uint8:
+        image = image.astype(np.uint8, copy=False)
+
+    return np.ascontiguousarray(image)
 
 
 def detect_people(
@@ -38,17 +80,9 @@ def detect_people(
     Detect person bounding boxes in a single image using YOLO.
     Returns a list of detection dicts with body crops and metadata.
     """
-    # Normalize input into a predictable format for Ultralytics.
+    image_bgr = load_image_bgr(image_path, preloaded_image=image_bgr)
     if image_bgr is None:
         return []
-    image_bgr = np.asarray(image_bgr)
-    if image_bgr.ndim == 2:
-        image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_GRAY2BGR)
-    if image_bgr.ndim != 3 or image_bgr.shape[2] != 3:
-        return []
-    if image_bgr.dtype != np.uint8:
-        image_bgr = image_bgr.astype(np.uint8, copy=False)
-    image_bgr = np.ascontiguousarray(image_bgr)
 
     try:
         # Primary path: run directly on in-memory OpenCV image.
@@ -312,7 +346,7 @@ def main():
     final_embeddings: List[np.ndarray] = []
 
     for idx, image_path in enumerate(image_paths, start=1):
-        image_bgr = cv2.imread(str(image_path))
+        image_bgr = load_image_bgr(image_path)
         if image_bgr is None:
             continue
 
