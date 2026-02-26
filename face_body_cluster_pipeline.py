@@ -51,15 +51,25 @@ def detect_people(
     image_bgr = np.ascontiguousarray(image_bgr)
 
     try:
+        # Primary path: run directly on in-memory OpenCV image.
         results = yolo_model.predict(
-            source=str(image_path),
+            source=image_bgr,
             classes=[0],  # COCO class 0 = person
             conf=conf_threshold,
             verbose=False,
         )[0]
-    except Exception as exc:
-        print(f"YOLO detect failed for {image_path.name}: {exc}")
-        return []
+    except Exception:
+        try:
+            # Fallback: some Ultralytics/OpenCV combos behave better with list input.
+            results = yolo_model.predict(
+                source=[image_bgr],
+                classes=[0],
+                conf=conf_threshold,
+                verbose=False,
+            )[0]
+        except Exception as exc:
+            print(f"YOLO detect failed for {image_path.name}: {exc}")
+            return []
 
     detections: List[Dict] = []
     if results.boxes is None or len(results.boxes) == 0:
