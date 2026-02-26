@@ -30,6 +30,13 @@ from athlete_workflow_prototype import (
 
 load_dotenv()
 
+try:
+    import cv2  # noqa: F401
+    import numpy as np  # noqa: F401
+    print(f"Runtime versions: numpy={np.__version__}, cv2={cv2.__version__}", flush=True)
+except Exception as _ver_err:
+    print(f"Runtime version probe failed: {_ver_err}", flush=True)
+
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 app.secret_key = "sports-photo-prototype-secret"

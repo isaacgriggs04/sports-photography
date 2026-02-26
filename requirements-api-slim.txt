@@ -9,7 +9,7 @@ boto3==1.35.36
 gunicorn==23.0.0
 Pillow==10.4.0
 numpy==1.26.4
-opencv-python-headless==4.10.0.84
+opencv-python==4.10.0.84
 ultralytics==8.3.28
 insightface==0.7.3
 onnx==1.16.2
@@ -21,4 +21,3 @@ tensorboard==2.17.1
 scikit-learn==1.4.2
 scipy==1.12.0
 hdbscan==0.8.40
-paddleocr==2.8.1
