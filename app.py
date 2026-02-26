@@ -150,21 +150,23 @@ def require_auth_or_anon_upload(f):
 
     return decorated
 BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR))).resolve()
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
-PHOTO_DIR = BASE_DIR / "game_photos"
-THUMB_DIR = BASE_DIR / "thumbnails"
+PHOTO_DIR = DATA_DIR / "game_photos"
+THUMB_DIR = DATA_DIR / "thumbnails"
 
-# Ensure local storage dirs exist (needed for Railway/container deployments)
+# Ensure persistent storage dirs exist (Railway volume can be mounted at DATA_DIR, e.g. /data)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 PHOTO_DIR.mkdir(parents=True, exist_ok=True)
 THUMB_DIR.mkdir(parents=True, exist_ok=True)
-GROUPS_JSON = BASE_DIR / "athlete_groups.json"
-UPLOADS_JSON = BASE_DIR / "uploads_manifest.json"
-PURCHASES_JSON = BASE_DIR / "purchases.json"
-USER_PROFILES_JSON = BASE_DIR / "user_profiles.json"
-NOTIFICATIONS_JSON = BASE_DIR / "notifications.json"
-PACKAGES_JSON = BASE_DIR / "packages.json"
-CARTS_JSON = BASE_DIR / "carts.json"
-CLUSTER_JOBS_JSON = BASE_DIR / "cluster_jobs.json"
+GROUPS_JSON = DATA_DIR / "athlete_groups.json"
+UPLOADS_JSON = DATA_DIR / "uploads_manifest.json"
+PURCHASES_JSON = DATA_DIR / "purchases.json"
+USER_PROFILES_JSON = DATA_DIR / "user_profiles.json"
+NOTIFICATIONS_JSON = DATA_DIR / "notifications.json"
+PACKAGES_JSON = DATA_DIR / "packages.json"
+CARTS_JSON = DATA_DIR / "carts.json"
+CLUSTER_JOBS_JSON = DATA_DIR / "cluster_jobs.json"
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 CLERK_PUBLISHABLE_KEY = os.getenv("VITE_CLERK_PUBLISHABLE_KEY", "")
@@ -1324,7 +1326,16 @@ def _append_photos_as_unclustered(photo_names):
 
 
 def _run_full_reclustering():
-    cmd = [sys.executable, "update_web_clusters_combined.py"]
+    cmd = [
+        sys.executable,
+        "update_web_clusters_combined.py",
+        "--images-dir",
+        str(PHOTO_DIR),
+        "--output-json",
+        str(GROUPS_JSON),
+        "--output-crops-dir",
+        str(DATA_DIR / "athlete_groups"),
+    ]
     try:
         result = subprocess.run(
             cmd,

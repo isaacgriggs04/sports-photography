@@ -52,7 +52,7 @@ def detect_people(
 
     try:
         results = yolo_model.predict(
-            source=image_bgr,
+            source=str(image_path),
             classes=[0],  # COCO class 0 = person
             conf=conf_threshold,
             verbose=False,
