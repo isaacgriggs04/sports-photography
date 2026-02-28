@@ -29,6 +29,8 @@ COPY constraints.txt /app/constraints.txt
 COPY requirements-api-slim.txt /app/requirements-api-slim.txt
 ENV PIP_CONSTRAINT=/app/constraints.txt
 RUN pip install --no-cache-dir -r /app/requirements-api-slim.txt
+# Ensure a single NumPy installation is the final state for all C extensions.
+RUN pip install --no-cache-dir --force-reinstall numpy==1.26.4
 
 COPY . /app
 COPY --from=frontend-build /frontend/dist /app/frontend/dist
