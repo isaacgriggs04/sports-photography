@@ -19,6 +19,7 @@ from werkzeug.utils import secure_filename
 import jwt
 import requests
 import stripe
+from PIL import Image, ImageOps
 try:
     import boto3
 except ImportError:  # Optional in local dev
@@ -190,6 +191,7 @@ WORKER_SHARED_SECRET = os.getenv("WORKER_SHARED_SECRET", "").strip()
 DISABLE_HEAVY_CLUSTERING = os.getenv("DISABLE_HEAVY_CLUSTERING", "false").strip().lower() == "true"
 ENABLE_CLOUD_UPLOADS = os.getenv("ENABLE_CLOUD_UPLOADS", "false").strip().lower() == "true"
 THUMBNAIL_SIZE = (300, 300)  # Max dimensions for thumbnails
+MAX_UPLOAD_LONG_EDGE = int(os.getenv("MAX_UPLOAD_LONG_EDGE", "2048"))
 
 CLUSTER_GAME_ID = 101
 CLUSTER_SCHOOL = "Homewood Flossmoor"
@@ -1047,6 +1049,13 @@ def _save_uploaded_files(files, photographer, school, sport, game_id, price=None
             target_path = PHOTO_DIR / f"{stem}_{now_ts}_{idx}{suffix}"
 
         file.save(target_path)
+        try:
+            _normalize_uploaded_image(target_path)
+        except Exception as exc:
+            print(f"Image normalization failed for {target_path.name}: {exc}", flush=True)
+            target_path.unlink(missing_ok=True)
+            skipped += 1
+            continue
         uploaded.append(target_path.name)
         entry = {
             "filename": target_path.name,
@@ -1064,6 +1073,45 @@ def _save_uploaded_files(files, photographer, school, sport, game_id, price=None
 
     _save_uploads_manifest(manifest)
     return uploaded, skipped
+
+
+def _normalize_uploaded_image(path: Path):
+    """
+    Normalize uploaded image for stable CV/ML processing:
+    - apply EXIF orientation
+    - convert non-RGB modes to RGB
+    - downscale oversized images to MAX_UPLOAD_LONG_EDGE
+    """
+    suffix = path.suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        return
+
+    with Image.open(path) as img:
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB",):
+            img = img.convert("RGB")
+
+        w, h = img.size
+        max_side = max(w, h)
+        if max_side > MAX_UPLOAD_LONG_EDGE:
+            scale = MAX_UPLOAD_LONG_EDGE / float(max_side)
+            img = img.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))),
+                Image.Resampling.LANCZOS,
+            )
+
+        save_kwargs = {}
+        fmt = "JPEG"
+        if suffix == ".png":
+            fmt = "PNG"
+            save_kwargs = {"optimize": True}
+        elif suffix == ".webp":
+            fmt = "WEBP"
+            save_kwargs = {"quality": 92, "method": 4}
+        else:
+            # .jpg/.jpeg
+            save_kwargs = {"quality": 92, "optimize": True}
+        img.save(path, format=fmt, **save_kwargs)
 
 
 def _photo_sha256(photo_name):
