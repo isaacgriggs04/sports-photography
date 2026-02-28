@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -110,7 +111,11 @@ def detect_people(
             conf=conf_threshold,
             verbose=False,
         )[0]
-    except Exception:
+    except Exception as exc:
+        print(
+            f"YOLO primary error for {image_path.name}: {exc}\n{traceback.format_exc()}",
+            flush=True,
+        )
         print(f"YOLO detect failed for {image_path.name}; using full-frame fallback", flush=True)
         # Hard fallback for environments where OpenCV resize bridge is broken.
         # Keep pipeline running by treating the full frame as one candidate.
@@ -198,7 +203,25 @@ def extract_body_embedding(
     """
     Extract body embedding using pretrained OSNet.
     """
-    crop_rgb = cv2.cvtColor(body_crop_bgr, cv2.COLOR_BGR2RGB)
+    arr = np.asarray(body_crop_bgr)
+    if arr.ndim == 2:
+        arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+    if arr.ndim != 3 or arr.shape[2] != 3:
+        raise ValueError(f"Invalid body crop shape for embedding: {getattr(arr, 'shape', None)}")
+    if arr.dtype != np.uint8:
+        arr = arr.astype(np.uint8, copy=False)
+    arr = np.ascontiguousarray(arr)
+    try:
+        crop_rgb = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+    except Exception as exc:
+        print(
+            "extract_body_embedding cvtColor failed: "
+            f"type={type(arr)} shape={getattr(arr, 'shape', None)} "
+            f"dtype={getattr(arr, 'dtype', None)} contiguous={arr.flags['C_CONTIGUOUS']} "
+            f"err={exc}",
+            flush=True,
+        )
+        raise
     pil_img = Image.fromarray(crop_rgb)
     tensor = preprocess(pil_img).unsqueeze(0).to(device)
     with torch.no_grad():
