@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
@@ -368,6 +369,12 @@ def main():
     images_dir = Path(args.images_dir)
     image_paths = sorted(
         [p for p in images_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}]
+    )
+    sample_paths = [str(p) for p in image_paths[:5]]
+    print(
+        f"[CLUSTER INPUT] pid={os.getpid()} DATA_DIR={os.getenv('DATA_DIR')} "
+        f"images_dir={images_dir} count={len(image_paths)} sample={sample_paths}",
+        flush=True,
     )
     if not image_paths:
         raise ValueError(f"No images found in {images_dir}")

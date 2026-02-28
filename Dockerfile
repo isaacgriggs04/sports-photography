@@ -35,4 +35,4 @@ COPY --from=frontend-build /frontend/dist /app/frontend/dist
 
 EXPOSE 8080
 ENV PORT=8080
-CMD gunicorn --workers 2 --threads 4 --timeout 300 --graceful-timeout 60 --keep-alive 5 -b 0.0.0.0:${PORT} app:app
+CMD gunicorn --workers 1 --threads 4 --timeout 300 --graceful-timeout 60 --keep-alive 5 -b 0.0.0.0:${PORT} app:app
