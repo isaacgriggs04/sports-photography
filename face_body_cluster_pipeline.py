@@ -123,7 +123,7 @@ def detect_people(
                 "image_path": str(image_path),
                 "bbox_xyxy": [0, 0, w, h],
                 "confidence": 0.0,
-                "body_crop_bgr": image_bgr,
+                "body_crop_bgr": np.ascontiguousarray(image_bgr.astype(np.uint8, copy=False)),
             }
         ]
 
@@ -147,6 +147,7 @@ def detect_people(
         body_crop = image_bgr[y1_i:y2_i, x1_i:x2_i]
         if body_crop.size == 0:
             continue
+        body_crop = np.ascontiguousarray(np.asarray(body_crop).astype(np.uint8, copy=False))
 
         detections.append(
             {

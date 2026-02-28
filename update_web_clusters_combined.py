@@ -410,7 +410,23 @@ def main():
 
         # Use one representative athlete crop per image for stable gallery grouping.
         det = pick_largest_detection(detections)
-        crop = det["body_crop_bgr"]
+        crop = det.get("body_crop_bgr")
+        try:
+            crop = np.asarray(crop)
+            if crop.ndim == 2:
+                crop = cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR)
+            if crop.ndim != 3 or crop.shape[2] != 3:
+                print(
+                    f"Skipping {image_path.name}: invalid crop shape={getattr(crop, 'shape', None)}",
+                    flush=True,
+                )
+                continue
+            if crop.dtype != np.uint8:
+                crop = crop.astype(np.uint8, copy=False)
+            crop = np.ascontiguousarray(crop)
+        except Exception as exc:
+            print(f"Skipping {image_path.name}: crop normalization failed: {exc}", flush=True)
+            continue
 
         ok, _reason = body_quality_ok(crop, args.min_w, args.min_h, args.min_lap_var)
         if not ok:

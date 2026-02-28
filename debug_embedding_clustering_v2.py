@@ -41,8 +41,19 @@ def normalize(vec: np.ndarray) -> np.ndarray:
 
 def laplacian_var(image_bgr: np.ndarray) -> float:
     """Simple sharpness proxy: variance of Laplacian."""
-    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    try:
+        arr = np.asarray(image_bgr)
+        if arr.ndim == 2:
+            arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+        if arr.ndim != 3 or arr.shape[2] != 3:
+            return 0.0
+        if arr.dtype != np.uint8:
+            arr = arr.astype(np.uint8, copy=False)
+        arr = np.ascontiguousarray(arr)
+        gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    except Exception:
+        return 0.0
 
 
 def pick_largest_detection(dets: List[Dict]) -> Dict:
@@ -65,10 +76,22 @@ def body_quality_ok(
     min_laplacian_var: float,
 ) -> Tuple[bool, str]:
     """Reject tiny/very blurry crops that degrade embedding quality."""
-    h, w = crop_bgr.shape[:2]
+    if crop_bgr is None:
+        return False, "invalid_crop(None)"
+    try:
+        arr = np.asarray(crop_bgr)
+    except Exception:
+        return False, "invalid_crop(non_array)"
+    if arr.ndim != 3 or arr.shape[2] != 3:
+        return False, f"invalid_crop(shape={getattr(arr, 'shape', None)})"
+    if arr.dtype != np.uint8:
+        arr = arr.astype(np.uint8, copy=False)
+    arr = np.ascontiguousarray(arr)
+
+    h, w = arr.shape[:2]
     if w < min_w or h < min_h:
         return False, f"small_crop({w}x{h})"
-    blur_score = laplacian_var(crop_bgr)
+    blur_score = laplacian_var(arr)
     if blur_score < min_laplacian_var:
         return False, f"blurry({blur_score:.1f})"
     return True, "ok"
