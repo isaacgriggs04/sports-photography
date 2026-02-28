@@ -39,21 +39,21 @@ def normalize(vec: np.ndarray) -> np.ndarray:
     return arr / n
 
 
-def laplacian_var(image_bgr: np.ndarray) -> float:
+def laplacian_var(image_bgr: np.ndarray) -> Optional[float]:
     """Simple sharpness proxy: variance of Laplacian."""
     try:
         arr = np.asarray(image_bgr)
         if arr.ndim == 2:
             arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
         if arr.ndim != 3 or arr.shape[2] != 3:
-            return 0.0
+            return None
         if arr.dtype != np.uint8:
             arr = arr.astype(np.uint8, copy=False)
         arr = np.ascontiguousarray(arr)
         gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())
     except Exception:
-        return 0.0
+        return None
 
 
 def pick_largest_detection(dets: List[Dict]) -> Dict:
@@ -92,6 +92,9 @@ def body_quality_ok(
     if w < min_w or h < min_h:
         return False, f"small_crop({w}x{h})"
     blur_score = laplacian_var(arr)
+    if blur_score is None:
+        # OpenCV not healthy in this environment; skip blur gate instead of hard-failing.
+        return True, "ok_no_blur_check"
     if blur_score < min_laplacian_var:
         return False, f"blurry({blur_score:.1f})"
     return True, "ok"

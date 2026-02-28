@@ -104,33 +104,58 @@ def detect_people(
         flush=True,
     )
     try:
-        # Primary path: let Ultralytics load from filesystem path.
+        # Primary path: run on in-memory array.
         results = yolo_model.predict(
-            source=str(image_path),
+            source=image_bgr,
             classes=[0],  # COCO class 0 = person
             conf=conf_threshold,
             verbose=False,
         )[0]
-    except Exception as exc:
+    except Exception as exc_mem:
         print(
-            f"YOLO primary error for {image_path.name}: {exc}\n{traceback.format_exc()}",
+            f"YOLO in-memory error for {image_path.name}: {exc_mem}\n{traceback.format_exc()}",
             flush=True,
         )
-        print(f"YOLO detect failed for {image_path.name}; using full-frame fallback", flush=True)
-        # Hard fallback for environments where OpenCV resize bridge is broken.
-        # Keep pipeline running by treating the full frame as one candidate.
-        h, w = image_bgr.shape[:2]
-        if h <= 1 or w <= 1:
-            return []
-        return [
-            {
-                "image_name": image_path.name,
-                "image_path": str(image_path),
-                "bbox_xyxy": [0, 0, w, h],
-                "confidence": 0.0,
-                "body_crop_bgr": np.ascontiguousarray(image_bgr.astype(np.uint8, copy=False)),
-            }
-        ]
+        try:
+            # Secondary path: list wrapper for ultralytics source parser.
+            results = yolo_model.predict(
+                source=[image_bgr],
+                classes=[0],
+                conf=conf_threshold,
+                verbose=False,
+            )[0]
+        except Exception as exc_list:
+            print(
+                f"YOLO list-source error for {image_path.name}: {exc_list}\n{traceback.format_exc()}",
+                flush=True,
+            )
+            try:
+                # Tertiary path: filesystem source.
+                results = yolo_model.predict(
+                    source=str(image_path),
+                    classes=[0],
+                    conf=conf_threshold,
+                    verbose=False,
+                )[0]
+            except Exception as exc_path:
+                print(
+                    f"YOLO path-source error for {image_path.name}: {exc_path}\n{traceback.format_exc()}",
+                    flush=True,
+                )
+                print(f"YOLO detect failed for {image_path.name}; using full-frame fallback", flush=True)
+                # Hard fallback for environments where OpenCV bridge is broken.
+                h, w = image_bgr.shape[:2]
+                if h <= 1 or w <= 1:
+                    return []
+                return [
+                    {
+                        "image_name": image_path.name,
+                        "image_path": str(image_path),
+                        "bbox_xyxy": [0, 0, w, h],
+                        "confidence": 0.0,
+                        "body_crop_bgr": np.ascontiguousarray(image_bgr.astype(np.uint8, copy=False)),
+                    }
+                ]
 
     detections: List[Dict] = []
     if results.boxes is None or len(results.boxes) == 0:
@@ -211,17 +236,8 @@ def extract_body_embedding(
     if arr.dtype != np.uint8:
         arr = arr.astype(np.uint8, copy=False)
     arr = np.ascontiguousarray(arr)
-    try:
-        crop_rgb = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-    except Exception as exc:
-        print(
-            "extract_body_embedding cvtColor failed: "
-            f"type={type(arr)} shape={getattr(arr, 'shape', None)} "
-            f"dtype={getattr(arr, 'dtype', None)} contiguous={arr.flags['C_CONTIGUOUS']} "
-            f"err={exc}",
-            flush=True,
-        )
-        raise
+    # Avoid cv2 color conversion in environments where OpenCV bridge is unstable.
+    crop_rgb = arr[:, :, ::-1].copy()
     pil_img = Image.fromarray(crop_rgb)
     tensor = preprocess(pil_img).unsqueeze(0).to(device)
     with torch.no_grad():
