@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 import cv2
@@ -374,6 +375,11 @@ def main():
     print(
         f"[CLUSTER INPUT] pid={os.getpid()} DATA_DIR={os.getenv('DATA_DIR')} "
         f"images_dir={images_dir} count={len(image_paths)} sample={sample_paths}",
+        flush=True,
+    )
+    print(
+        f"[RUNTIME DIAG] numpy={np.__version__} np_file={getattr(np, '__file__', None)} "
+        f"np_id={id(np)} cv2={cv2.__version__} py={sys.version.split()[0]}",
         flush=True,
     )
     if not image_paths:

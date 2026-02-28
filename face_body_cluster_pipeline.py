@@ -26,8 +26,10 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
-from torchvision import transforms
 from ultralytics import YOLO
+
+
+_YOLO_ERROR_LOGGED = {"mem": False, "list": False, "path": False}
 
 
 def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarray]:
@@ -112,10 +114,12 @@ def detect_people(
             verbose=False,
         )[0]
     except Exception as exc_mem:
-        print(
-            f"YOLO in-memory error for {image_path.name}: {exc_mem}\n{traceback.format_exc()}",
-            flush=True,
-        )
+        if not _YOLO_ERROR_LOGGED["mem"]:
+            print(
+                f"YOLO in-memory error sample for {image_path.name}: {exc_mem}\n{traceback.format_exc()}",
+                flush=True,
+            )
+            _YOLO_ERROR_LOGGED["mem"] = True
         try:
             # Secondary path: list wrapper for ultralytics source parser.
             results = yolo_model.predict(
@@ -125,10 +129,12 @@ def detect_people(
                 verbose=False,
             )[0]
         except Exception as exc_list:
-            print(
-                f"YOLO list-source error for {image_path.name}: {exc_list}\n{traceback.format_exc()}",
-                flush=True,
-            )
+            if not _YOLO_ERROR_LOGGED["list"]:
+                print(
+                    f"YOLO list-source error sample for {image_path.name}: {exc_list}\n{traceback.format_exc()}",
+                    flush=True,
+                )
+                _YOLO_ERROR_LOGGED["list"] = True
             try:
                 # Tertiary path: filesystem source.
                 results = yolo_model.predict(
@@ -138,10 +144,12 @@ def detect_people(
                     verbose=False,
                 )[0]
             except Exception as exc_path:
-                print(
-                    f"YOLO path-source error for {image_path.name}: {exc_path}\n{traceback.format_exc()}",
-                    flush=True,
-                )
+                if not _YOLO_ERROR_LOGGED["path"]:
+                    print(
+                        f"YOLO path-source error sample for {image_path.name}: {exc_path}\n{traceback.format_exc()}",
+                        flush=True,
+                    )
+                    _YOLO_ERROR_LOGGED["path"] = True
                 print(f"YOLO detect failed for {image_path.name}; using full-frame fallback", flush=True)
                 # Hard fallback for environments where OpenCV bridge is broken.
                 h, w = image_bgr.shape[:2]
@@ -343,13 +351,17 @@ def _build_body_model(device: torch.device):
     )
     body_model.eval().to(device)
 
-    preprocess = transforms.Compose(
-        [
-            transforms.Resize((256, 128)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
+    # Avoid torchvision ToTensor() numpy bridge to prevent numpy instance/type conflicts.
+    mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(3, 1, 1)
+
+    def preprocess(pil_img: Image.Image) -> torch.Tensor:
+        img = pil_img.resize((128, 256), Image.Resampling.BILINEAR).convert("RGB")
+        w, h = img.size
+        buf = torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes()))
+        tensor = buf.view(h, w, 3).permute(2, 0, 1).to(dtype=torch.float32).div_(255.0)
+        return (tensor - mean) / std
+
     return body_model, preprocess
 
 
