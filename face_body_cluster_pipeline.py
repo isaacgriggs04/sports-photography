@@ -26,7 +26,7 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
-from ultralytics import YOLO
+from ultralytics import YOLO 
 
 
 _YOLO_ERROR_LOGGED = {"mem": False, "list": False, "path": False}

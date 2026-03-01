@@ -1,0 +1,36 @@
+{
+  "athletes": {},
+  "unclustered": [
+    {
+      "photo": "same1.jpg",
+      "bbox_xyxy": [
+        4.0,
+        47.0,
+        1414.0,
+        3160.0
+      ],
+      "confidence": 0.9454184174537659,
+      "jersey_number": null,
+      "jersey_confidence": null
+    },
+    {
+      "photo": "same2.jpg",
+      "bbox_xyxy": [
+        68.0,
+        309.0,
+        2666.0,
+        3635.0
+      ],
+      "confidence": 0.8020713329315186,
+      "jersey_number": null,
+      "jersey_confidence": null
+    }
+  ],
+  "stats": {
+    "images": 2,
+    "detections": 2,
+    "clustered_detections": 0,
+    "clusters": 0,
+    "method": "incremental_append_new_uploads"
+  }
+}

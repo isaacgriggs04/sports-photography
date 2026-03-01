@@ -1,0 +1,24 @@
+[
+  {
+    "filename": "same1.jpg",
+    "uploaded_at_unix": 1772075034,
+    "photographer": "local-test",
+    "school": "Homewood Flossmoor",
+    "sport": "Softball",
+    "game_id": "101",
+    "price": 1.0,
+    "include_in_package": true,
+    "uploader_id": "anon-upload"
+  },
+  {
+    "filename": "same2.jpg",
+    "uploaded_at_unix": 1772075034,
+    "photographer": "local-test",
+    "school": "Homewood Flossmoor",
+    "sport": "Softball",
+    "game_id": "101",
+    "price": 1.0,
+    "include_in_package": true,
+    "uploader_id": "anon-upload"
+  }
+]
