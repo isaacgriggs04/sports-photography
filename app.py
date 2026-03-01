@@ -1,5 +1,6 @@
 import json
 import hashlib
+import io
 import os
 import shutil
 import subprocess
@@ -11,6 +12,7 @@ from functools import wraps
 from tempfile import TemporaryDirectory
 from pathlib import Path
 from json import JSONDecodeError
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, request, send_from_directory, send_file
@@ -30,6 +32,32 @@ from athlete_workflow_prototype import (
 )
 
 load_dotenv()
+
+
+def _parse_s3_bucket_name(raw_value: str) -> str:
+    """Accept plain bucket names, s3://bucket, or HTTPS S3 URLs."""
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+    if value.startswith("s3://"):
+        parsed = urlparse(value)
+        bucket = (parsed.netloc or "").strip()
+        if bucket:
+            return bucket
+        path_parts = [p for p in parsed.path.split("/") if p]
+        return path_parts[0] if path_parts else ""
+    if value.startswith("http://") or value.startswith("https://"):
+        parsed = urlparse(value)
+        host = (parsed.netloc or "").strip()
+        path_parts = [p for p in parsed.path.split("/") if p]
+        if host.startswith("s3.") or host.startswith("s3-"):
+            return path_parts[0] if path_parts else ""
+        if ".s3." in host:
+            return host.split(".s3.", 1)[0]
+        if host.endswith(".amazonaws.com") and path_parts:
+            return path_parts[0]
+        return host
+    return value
 
 try:
     import cv2  # noqa: F401
@@ -184,7 +212,8 @@ INSTAGRAM_APP_SECRET = os.getenv("INSTAGRAM_APP_SECRET", "")
 INSTAGRAM_REDIRECT_URI = os.getenv("INSTAGRAM_REDIRECT_URI", "")  # e.g. http://localhost:8080/api/instagram/callback
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
-S3_UPLOADS_BUCKET = os.getenv("S3_UPLOADS_BUCKET", "").strip()
+S3_UPLOADS_BUCKET_RAW = os.getenv("S3_UPLOADS_BUCKET", "").strip()
+S3_UPLOADS_BUCKET = _parse_s3_bucket_name(S3_UPLOADS_BUCKET_RAW)
 S3_THUMBNAILS_BUCKET = os.getenv("S3_THUMBNAILS_BUCKET", "").strip()
 SQS_CLUSTER_QUEUE_URL = os.getenv("SQS_CLUSTER_QUEUE_URL", "").strip()
 CLOUDFRONT_DOMAIN = os.getenv("CLOUDFRONT_DOMAIN", "").strip()
@@ -461,9 +490,11 @@ def _cluster_queue_enabled():
 
 def _enqueue_cluster_job(job):
     if not _cluster_queue_enabled():
+        print("Cluster queue disabled: SQS_CLUSTER_QUEUE_URL is not configured", flush=True)
         return False, "SQS_CLUSTER_QUEUE_URL is not configured"
     sqs = _sqs_client()
     if sqs is None:
+        print("Cluster queue unavailable: boto3 is not installed/configured", flush=True)
         return False, "boto3 is not installed/configured"
     try:
         sqs.send_message(
@@ -477,6 +508,7 @@ def _enqueue_cluster_job(job):
         )
         return True, None
     except Exception as e:
+        print(f"Failed to enqueue cluster job {job.get('id')}: {e}", flush=True)
         return False, str(e)
 
 
@@ -497,8 +529,36 @@ def _cloudfront_url_for_key(key):
     if not key:
         return ""
     if not CLOUDFRONT_DOMAIN:
+        if S3_UPLOADS_BUCKET:
+            return f"https://{S3_UPLOADS_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key.lstrip('/')}"
         return ""
     return f"https://{CLOUDFRONT_DOMAIN.strip('/')}/{key.lstrip('/')}"
+
+
+def _manifest_entry_for_photo(photo_name):
+    if not photo_name:
+        return None
+    manifest = _load_uploads_manifest()
+    for entry in reversed(manifest):
+        if (entry.get("filename") or "").strip() == photo_name:
+            return entry
+    return None
+
+
+def _build_s3_get_url_for_key(key, expires=900):
+    if not key or not S3_UPLOADS_BUCKET:
+        return ""
+    s3 = _s3_client()
+    if s3 is None:
+        return ""
+    try:
+        return s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_UPLOADS_BUCKET, "Key": key},
+            ExpiresIn=int(expires),
+        )
+    except Exception:
+        return ""
 
 
 def _all_cluster_photo_names(cluster_data):
@@ -1013,11 +1073,25 @@ def _send_purchase_email(to_email, photo_names, amount_cents, stripe_session_id=
 
         for photo_name in photo_names:
             path = PHOTO_DIR / photo_name
-            if not path.exists():
+            payload_bytes = None
+            if path.exists():
+                with open(path, "rb") as fp:
+                    payload_bytes = fp.read()
+            else:
+                entry = _manifest_entry_for_photo(photo_name)
+                key = (entry or {}).get("storage_key")
+                if key and S3_UPLOADS_BUCKET:
+                    s3 = _s3_client()
+                    if s3 is not None:
+                        try:
+                            obj = s3.get_object(Bucket=S3_UPLOADS_BUCKET, Key=key)
+                            payload_bytes = obj["Body"].read()
+                        except Exception as exc:
+                            print(f"Failed to fetch {photo_name} from S3 for email attachment: {exc}")
+            if not payload_bytes:
                 continue
-            with open(path, "rb") as fp:
-                part = MIMEBase("application", "octet-stream")
-                part.set_payload(fp.read())
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(payload_bytes)
             encoders.encode_base64(part)
             part.add_header("Content-Disposition", "attachment", filename=photo_name)
             msg.attach(part)
@@ -1029,6 +1103,46 @@ def _send_purchase_email(to_email, photo_names, amount_cents, stripe_session_id=
         print(f"Purchase email sent to {to_email} for {len(photo_names)} photo(s)")
     except Exception as e:
         print(f"Failed to send purchase email to {to_email}: {e}")
+
+
+def _normalize_uploaded_file(file_storage, suffix):
+    """
+    Normalize an uploaded image stream and return (BytesIO, content_type).
+    Keeps processing identical to disk normalization while allowing direct S3 upload.
+    """
+    stream = file_storage.stream
+    stream.seek(0)
+    with Image.open(stream) as img:
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB",):
+            img = img.convert("RGB")
+
+        w, h = img.size
+        max_side = max(w, h)
+        if max_side > MAX_UPLOAD_LONG_EDGE:
+            scale = MAX_UPLOAD_LONG_EDGE / float(max_side)
+            img = img.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))),
+                Image.Resampling.LANCZOS,
+            )
+
+        out = io.BytesIO()
+        save_kwargs = {}
+        fmt = "JPEG"
+        content_type = "image/jpeg"
+        if suffix == ".png":
+            fmt = "PNG"
+            content_type = "image/png"
+            save_kwargs = {"optimize": True}
+        elif suffix == ".webp":
+            fmt = "WEBP"
+            content_type = "image/webp"
+            save_kwargs = {"quality": 92, "method": 4}
+        else:
+            save_kwargs = {"quality": 92, "optimize": True}
+        img.save(out, format=fmt, **save_kwargs)
+        out.seek(0)
+        return out, content_type
 
 
 def _save_uploaded_files(files, photographer, school, sport, game_id, price=None, include_in_package=True, uploader_id=None):
@@ -1086,6 +1200,90 @@ def _save_uploaded_files(files, photographer, school, sport, game_id, price=None
 
     _save_uploads_manifest(manifest)
     return uploaded, skipped
+
+
+def _save_uploaded_files_to_s3(
+    files,
+    photographer,
+    school,
+    sport,
+    game_id,
+    price=None,
+    include_in_package=True,
+    uploader_id=None,
+):
+    """Normalize uploads in-memory and store directly in S3."""
+    if not _uploads_in_cloud_enabled():
+        raise RuntimeError("Cloud uploads are not configured (S3_UPLOADS_BUCKET missing).")
+    s3 = _s3_client()
+    if s3 is None:
+        raise RuntimeError("AWS SDK unavailable. Install boto3 and configure credentials.")
+
+    uploaded = []
+    skipped = 0
+    file_records = []
+    manifest = _load_uploads_manifest()
+    existing_names = {str(item.get("filename") or "").strip() for item in manifest if item.get("filename")}
+    now_ts = int(time.time())
+    owner_for_key = (uploader_id or "anon-upload").strip() or "anon-upload"
+
+    try:
+        price_value = float(price) if price else 0.0
+    except (ValueError, TypeError):
+        price_value = 0.0
+
+    for idx, file in enumerate(files, start=1):
+        if not file or not file.filename:
+            continue
+
+        clean_name = secure_filename(file.filename)
+        suffix = Path(clean_name).suffix.lower()
+        if suffix not in ALLOWED_EXTENSIONS:
+            skipped += 1
+            continue
+
+        filename = clean_name
+        if filename in uploaded or filename in existing_names:
+            stem = Path(clean_name).stem
+            filename = f"{stem}_{now_ts}_{idx}{suffix}"
+            while filename in uploaded or filename in existing_names:
+                filename = f"{stem}_{now_ts}_{idx}_{uuid.uuid4().hex[:6]}{suffix}"
+
+        storage_key = _build_storage_key(user_id=owner_for_key, game_id=game_id, filename=filename)
+        try:
+            normalized_stream, content_type = _normalize_uploaded_file(file, suffix)
+            s3.upload_fileobj(
+                normalized_stream,
+                S3_UPLOADS_BUCKET,
+                storage_key,
+                ExtraArgs={"ContentType": content_type},
+            )
+        except Exception as exc:
+            print(f"S3 upload failed for {filename}: {exc}", flush=True)
+            skipped += 1
+            continue
+
+        uploaded.append(filename)
+        existing_names.add(filename)
+        file_records.append({"filename": filename, "key": storage_key})
+        entry = {
+            "filename": filename,
+            "uploaded_at_unix": now_ts,
+            "photographer": photographer,
+            "school": school,
+            "sport": sport,
+            "game_id": str(game_id),
+            "price": price_value,
+            "include_in_package": bool(include_in_package),
+            "storage_key": storage_key,
+            "storage": "s3",
+        }
+        if uploader_id:
+            entry["uploader_id"] = uploader_id
+        manifest.append(entry)
+
+    _save_uploads_manifest(manifest)
+    return uploaded, skipped, file_records
 
 
 def _normalize_uploaded_image(path: Path):
@@ -1840,7 +2038,16 @@ def _generate_thumbnail(filename):
 
 @app.route("/api/images/<path:filename>", methods=["GET"])
 def api_image(filename):
-    return send_from_directory(str(PHOTO_DIR), filename)
+    local_path = PHOTO_DIR / filename
+    if local_path.exists():
+        return send_from_directory(str(PHOTO_DIR), filename)
+    entry = _manifest_entry_for_photo(filename)
+    key = (entry or {}).get("storage_key")
+    if key:
+        url = _cloudfront_url_for_key(key) or _build_s3_get_url_for_key(key)
+        if url:
+            return redirect(url, code=302)
+    return jsonify({"error": "Image not found"}), 404
 
 
 @app.route("/api/thumbnails/<path:filename>", methods=["GET"])
@@ -1863,11 +2070,37 @@ def api_thumbnail(filename):
         return send_from_directory(str(THUMB_DIR), generated.name)
 
     # Fallback to original
-    return send_from_directory(str(PHOTO_DIR), filename)
+    original = PHOTO_DIR / filename
+    if original.exists():
+        return send_from_directory(str(PHOTO_DIR), filename)
+    entry = _manifest_entry_for_photo(filename)
+    if entry:
+        key = entry.get("thumbnail_key") or entry.get("storage_key")
+        url = _cloudfront_url_for_key(key) or _build_s3_get_url_for_key(key)
+        if url:
+            return redirect(url, code=302)
+    return jsonify({"error": "Thumbnail not found"}), 404
 
 
 @app.route("/api/photographer/photos", methods=["GET"])
 def api_photographer_photos():
+    if _uploads_in_cloud_enabled():
+        manifest = _load_uploads_manifest()
+        photos = []
+        for entry in manifest:
+            name = (entry.get("filename") or "").strip()
+            if not name:
+                continue
+            image_path, thumb_path = _resolve_photo_urls(name, entry)
+            photos.append(
+                {
+                    "image_url": name,
+                    "image_path": image_path,
+                    "thumbnail_path": thumb_path,
+                }
+            )
+        return jsonify(photos)
+
     PHOTO_DIR.mkdir(parents=True, exist_ok=True)
     photos = sorted(
         [p.name for p in PHOTO_DIR.iterdir() if p.suffix.lower() in ALLOWED_EXTENSIONS]
@@ -2012,16 +2245,21 @@ def api_uploads_complete():
     if ok:
         _set_cluster_job_status(job["id"], "queued", {"queue": "sqs"})
     else:
-        # Fallback: local clustering worker for non-cloud/dev mode.
-        _start_reclustering_async(uploaded_files)
-        _set_cluster_job_status(job["id"], "running", {"queue": "local_thread", "queue_error": queue_err})
+        # If queueing is unavailable in cloud mode, keep uploads visible as Unknown.
+        print(f"Cluster job {job['id']} not queued; fallback to unknown. reason={queue_err}", flush=True)
+        _append_photos_as_unclustered(uploaded_files)
+        _set_cluster_job_status(
+            job["id"],
+            "completed",
+            {"queue": "none", "queue_error": queue_err, "fallback": "unknown_cluster"},
+        )
 
     return jsonify({
         "ok": True,
         "uploaded_count": len(uploaded_files),
         "uploaded_files": uploaded_files,
         "job_id": job["id"],
-        "clustering_started": True,
+        "clustering_started": bool(ok),
     })
 
 
@@ -2042,9 +2280,11 @@ def api_job_status(job_id):
 def api_internal_job_update(job_id):
     """Internal worker callback to update clustering job status."""
     if not WORKER_SHARED_SECRET:
+        print("Worker callback rejected: WORKER_SHARED_SECRET not configured", flush=True)
         return jsonify({"error": "WORKER_SHARED_SECRET not configured"}), 503
     auth_header = request.headers.get("Authorization", "")
     if auth_header != f"Bearer {WORKER_SHARED_SECRET}":
+        print(f"Worker callback unauthorized for job {job_id}", flush=True)
         return jsonify({"error": "Unauthorized"}), 401
 
     data = request.get_json() or {}
@@ -2064,6 +2304,7 @@ def api_internal_job_update(job_id):
             extra.update(ingest_extra)
         else:
             status = "failed"
+            print(f"Worker result ingest failed for {job_id}: {ingest_extra}", flush=True)
             extra.update(ingest_extra)
     _set_cluster_job_status(job_id, status, extra=extra)
     return jsonify({"ok": True})
@@ -2083,6 +2324,63 @@ def api_photographer_upload():
 
     if not files:
         return jsonify({"error": "No files provided."}), 400
+
+    if _uploads_in_cloud_enabled():
+        try:
+            uploaded, skipped, file_records = _save_uploaded_files_to_s3(
+                files=files,
+                photographer=photographer,
+                school=school,
+                sport=sport,
+                game_id=game_id,
+                price=price,
+                include_in_package=include_in_package,
+                uploader_id=uploader_id,
+            )
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
+
+        if not uploaded:
+            return jsonify({
+                "error": "No supported image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp",
+                "uploaded_count": 0,
+                "skipped_count": skipped,
+            }), 400
+
+        job = _new_cluster_job(
+            user_id=uploader_id or "anon-upload",
+            game_id=game_id,
+            files=file_records,
+            metadata={
+                "school": school,
+                "sport": sport,
+                "photographer": photographer,
+            },
+        )
+        ok, queue_err = _enqueue_cluster_job(job)
+        if ok:
+            _set_cluster_job_status(job["id"], "queued", {"queue": "sqs"})
+        else:
+            print(f"Cluster job {job['id']} not queued; fallback to unknown. reason={queue_err}", flush=True)
+            _append_photos_as_unclustered(uploaded)
+            _set_cluster_job_status(
+                job["id"],
+                "completed",
+                {"queue": "none", "queue_error": queue_err, "fallback": "unknown_cluster"},
+            )
+
+        return jsonify(
+            {
+                "uploaded_count": len(uploaded),
+                "skipped_count": skipped,
+                "uploaded_files": uploaded,
+                "school": school,
+                "sport": sport,
+                "game_id": game_id,
+                "job_id": job["id"],
+                "clustering_started": bool(ok),
+            }
+        )
 
     uploaded, skipped = _save_uploaded_files(
         files=files,
@@ -2129,6 +2427,63 @@ def api_game_upload(game_id):
     price = request.form.get("price", "0")
     include_in_package = request.form.get("include_in_package", "true").lower() == "true"
     uploader_id = getattr(request, "clerk_user_id", None)
+
+    if _uploads_in_cloud_enabled():
+        try:
+            uploaded, skipped, file_records = _save_uploaded_files_to_s3(
+                files=files,
+                photographer=photographer,
+                school=school,
+                sport=sport,
+                game_id=str(game_id),
+                price=price,
+                include_in_package=include_in_package,
+                uploader_id=uploader_id,
+            )
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
+
+        if not uploaded:
+            return jsonify({
+                "error": "No supported image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp",
+                "uploaded_count": 0,
+                "skipped_count": skipped,
+            }), 400
+
+        job = _new_cluster_job(
+            user_id=uploader_id or "anon-upload",
+            game_id=str(game_id),
+            files=file_records,
+            metadata={
+                "school": school,
+                "sport": sport,
+                "photographer": photographer,
+            },
+        )
+        ok, queue_err = _enqueue_cluster_job(job)
+        if ok:
+            _set_cluster_job_status(job["id"], "queued", {"queue": "sqs"})
+        else:
+            print(f"Cluster job {job['id']} not queued; fallback to unknown. reason={queue_err}", flush=True)
+            _append_photos_as_unclustered(uploaded)
+            _set_cluster_job_status(
+                job["id"],
+                "completed",
+                {"queue": "none", "queue_error": queue_err, "fallback": "unknown_cluster"},
+            )
+
+        clusters = api_game_clusters(game_id).get_json()
+        return jsonify(
+            {
+                "uploaded_count": len(uploaded),
+                "skipped_count": skipped,
+                "uploaded_files": uploaded,
+                "game_id": game_id,
+                "job_id": job["id"],
+                "clustering_started": bool(ok),
+                "clusters": clusters,
+            }
+        )
 
     uploaded, skipped = _save_uploaded_files(
         files=files,
@@ -2717,14 +3072,19 @@ def download_purchased_photo(photo_name):
     for p in purchases:
         if p.get("clerk_user_id") == user_id and photo_name in (p.get("photo_names") or []):
             path = PHOTO_DIR / photo_name
-            if not path.exists():
-                return jsonify({"error": "Photo file not found"}), 404
-            return send_file(
-                path,
-                as_attachment=True,
-                download_name=photo_name,
-                mimetype="application/octet-stream",
-            )
+            if path.exists():
+                return send_file(
+                    path,
+                    as_attachment=True,
+                    download_name=photo_name,
+                    mimetype="application/octet-stream",
+                )
+            entry = _manifest_entry_for_photo(photo_name)
+            key = (entry or {}).get("storage_key")
+            signed_url = _build_s3_get_url_for_key(key, expires=300)
+            if signed_url:
+                return redirect(signed_url, code=302)
+            return jsonify({"error": "Photo file not found"}), 404
     return jsonify({"error": "You do not have access to this photo"}), 403
 
 
