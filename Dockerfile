@@ -16,6 +16,18 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
+    cmake \
+    pkg-config \
+    python3-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libv4l-dev \
+    libxvidcore-dev \
+    libx264-dev \
     libglib2.0-0 \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*
@@ -31,6 +43,10 @@ ENV PIP_CONSTRAINT=/app/constraints.txt
 RUN pip install --no-cache-dir -r /app/requirements-api-slim.txt
 # Ensure a single NumPy installation is the final state for all C extensions.
 RUN pip install --no-cache-dir --force-reinstall numpy==1.26.4
+# Replace prebuilt OpenCV wheels with a source-built headless OpenCV to avoid
+# runtime ABI incompatibilities in constrained container environments.
+RUN pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python || true
+RUN pip install --no-cache-dir --no-binary opencv-python-headless opencv-python-headless==4.10.0.84
 
 COPY . /app
 COPY --from=frontend-build /frontend/dist /app/frontend/dist
