@@ -175,6 +175,7 @@ NOTIFICATIONS_JSON = DATA_DIR / "notifications.json"
 PACKAGES_JSON = DATA_DIR / "packages.json"
 CARTS_JSON = DATA_DIR / "carts.json"
 CLUSTER_JOBS_JSON = DATA_DIR / "cluster_jobs.json"
+CLUSTER_DEBUG_LOG = DATA_DIR / "clustering_debug.log"
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 CLERK_PUBLISHABLE_KEY = os.getenv("VITE_CLERK_PUBLISHABLE_KEY", "")
@@ -223,6 +224,18 @@ _CLUSTER_EMBEDDINGS_CACHE = {
     "embeddings": {},   # cluster_id -> list of embeddings
 }
 _CLUSTER_EMB_LOCK = threading.Lock()
+
+
+def _append_cluster_debug(label: str, text: str):
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with CLUSTER_DEBUG_LOG.open("a", encoding="utf-8") as f:
+            f.write(f"\n===== {int(time.time())} {label} =====\n")
+            f.write(text if text is not None else "")
+            if not text or not text.endswith("\n"):
+                f.write("\n")
+    except Exception as exc:
+        print(f"Failed to write clustering debug log: {exc}", flush=True)
 
 
 def _get_ml_models():
@@ -1399,6 +1412,8 @@ def _run_full_reclustering():
             timeout=300,
             check=False,
         )
+        _append_cluster_debug("FULL_CLUSTER_STDOUT", result.stdout or "")
+        _append_cluster_debug("FULL_CLUSTER_STDERR", result.stderr or "")
         return {
             "ok": result.returncode == 0,
             "code": result.returncode,
@@ -1406,6 +1421,7 @@ def _run_full_reclustering():
             "stderr": result.stderr[-3000:],
         }
     except subprocess.TimeoutExpired:
+        _append_cluster_debug("FULL_CLUSTER_TIMEOUT", "Clustering timed out after 300 seconds.")
         return {
             "ok": False,
             "code": -1,
@@ -1413,6 +1429,7 @@ def _run_full_reclustering():
             "stderr": "Clustering timed out after 300 seconds.",
         }
     except Exception as exc:
+        _append_cluster_debug("FULL_CLUSTER_EXCEPTION", f"{exc}")
         return {
             "ok": False,
             "code": -1,
@@ -1463,6 +1480,8 @@ def _run_incremental_reclustering(new_files):
                 timeout=300,
                 check=False,
             )
+            _append_cluster_debug("INCREMENTAL_CLUSTER_STDOUT", result.stdout or "")
+            _append_cluster_debug("INCREMENTAL_CLUSTER_STDERR", result.stderr or "")
             if result.returncode != 0:
                 if result.returncode < 0:
                     _append_photos_as_unclustered(files_to_cluster)
@@ -1502,6 +1521,7 @@ def _run_incremental_reclustering(new_files):
                 "stderr": "",
             }
     except subprocess.TimeoutExpired:
+        _append_cluster_debug("INCREMENTAL_CLUSTER_TIMEOUT", "Incremental clustering timed out after 300 seconds.")
         return {
             "ok": False,
             "code": -1,
@@ -1509,6 +1529,7 @@ def _run_incremental_reclustering(new_files):
             "stderr": "Incremental clustering timed out after 300 seconds.",
         }
     except Exception as exc:
+        _append_cluster_debug("INCREMENTAL_CLUSTER_EXCEPTION", f"{exc}")
         return {
             "ok": False,
             "code": -1,
@@ -1723,6 +1744,18 @@ def api_clustering_status():
     with CLUSTER_STATE_LOCK:
         state = dict(CLUSTER_STATE)
     return jsonify(state)
+
+
+@app.route("/debug/clustering-log", methods=["GET"])
+def api_debug_clustering_log():
+    try:
+        if not CLUSTER_DEBUG_LOG.exists():
+            return "", 200, {"Content-Type": "text/plain; charset=utf-8"}
+        content = CLUSTER_DEBUG_LOG.read_text(encoding="utf-8", errors="replace")
+        # Return tail to avoid very large responses.
+        return content[-400000:], 200, {"Content-Type": "text/plain; charset=utf-8"}
+    except Exception as e:
+        return str(e), 500, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/clusters/<cluster_id>", methods=["GET"])
