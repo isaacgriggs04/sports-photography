@@ -47,6 +47,15 @@ const cartFingerprint = (items) => {
   }
 };
 
+const resolveMediaUrl = (path) => {
+  const raw = String(path || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('//') || raw.startsWith('data:') || raw.startsWith('blob:')) {
+    return raw;
+  }
+  return `${API_HOST}${raw}`;
+};
+
 function App() {
   const { getToken, isSignedIn } = useAuth();
   const { openSignIn, openUserProfile, signOut } = useClerk();
@@ -1757,7 +1766,7 @@ function App() {
                   <div className="aspect-square bg-gray-100 relative overflow-hidden">
                     {cluster.photos[0] ? (
                       <img
-                        src={`${API_HOST}${cluster.photos[0].thumbnail_path || cluster.photos[0].image_path}`}
+                        src={resolveMediaUrl(cluster.photos[0].thumbnail_path || cluster.photos[0].image_path)}
                         alt={cluster.cluster_id}
                         className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                         loading="lazy"
@@ -1869,7 +1878,7 @@ function App() {
                     onClick={() => setLightboxPhoto(photo)}
                   >
                     <img
-                      src={`${API_HOST}${photo.thumbnail_path || photo.image_path}`}
+                      src={resolveMediaUrl(photo.thumbnail_path || photo.image_path)}
                       alt={photo.image_url}
                       className="h-full w-full object-cover transition-transform duration-700 group-hover/image:scale-110"
                       loading="lazy"
@@ -2021,7 +2030,7 @@ function App() {
                   {cart.map((photo) => (
                     <div key={photo.image_url} className="flex gap-4 p-4 bg-gray-50 rounded-xl">
                       <img
-                        src={`${API_HOST}${photo.thumbnail_path || photo.image_path}`}
+                        src={resolveMediaUrl(photo.thumbnail_path || photo.image_path)}
                         alt={photo.image_url}
                         className="w-24 h-24 object-cover rounded-lg"
                       />
@@ -2239,7 +2248,7 @@ function App() {
             {/* Image */}
             <div className="flex-1 bg-gray-900 flex items-center justify-center p-4 min-h-[400px]">
               <img
-                src={`${API_HOST}${lightboxPhoto.image_path}`}
+                src={resolveMediaUrl(lightboxPhoto.image_path)}
                 alt={lightboxPhoto.image_url}
                 className="max-w-full max-h-[80vh] object-contain"
               />
