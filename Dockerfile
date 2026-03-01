@@ -15,6 +15,8 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ninja-build \
     g++ \
     cmake \
     pkg-config \
