@@ -6,6 +6,7 @@ import sys
 import time
 from tempfile import TemporaryDirectory
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -16,12 +17,40 @@ except ImportError:
 
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 SQS_CLUSTER_QUEUE_URL = os.getenv("SQS_CLUSTER_QUEUE_URL", "").strip()
-S3_UPLOADS_BUCKET = os.getenv("S3_UPLOADS_BUCKET", "").strip()
+S3_UPLOADS_BUCKET_RAW = os.getenv("S3_UPLOADS_BUCKET", "").strip()
 API_INTERNAL_BASE = os.getenv("API_INTERNAL_BASE", "http://127.0.0.1:8080").rstrip("/")
 WORKER_SHARED_SECRET = os.getenv("WORKER_SHARED_SECRET", "").strip()
 PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", ".")).resolve()
 CLUSTER_SCRIPT_PATH = os.getenv("CLUSTER_SCRIPT_PATH", "update_web_clusters_combined.py").strip()
 YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "yolo26n.pt").strip()
+
+
+def _parse_s3_bucket_name(raw_value):
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+    if value.startswith("s3://"):
+        parsed = urlparse(value)
+        bucket = (parsed.netloc or "").strip()
+        if bucket:
+            return bucket
+        path_parts = [p for p in parsed.path.split("/") if p]
+        return path_parts[0] if path_parts else ""
+    if value.startswith("http://") or value.startswith("https://"):
+        parsed = urlparse(value)
+        host = (parsed.netloc or "").strip()
+        path_parts = [p for p in parsed.path.split("/") if p]
+        if host.startswith("s3.") or host.startswith("s3-"):
+            return path_parts[0] if path_parts else ""
+        if ".s3." in host:
+            return host.split(".s3.", 1)[0]
+        if host.endswith(".amazonaws.com") and path_parts:
+            return path_parts[0]
+        return host
+    return value
+
+
+S3_UPLOADS_BUCKET = _parse_s3_bucket_name(S3_UPLOADS_BUCKET_RAW)
 
 
 def _require_env(name, value):
