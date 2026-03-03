@@ -616,7 +616,9 @@ def _resolve_photo_urls(photo_name, manifest_entry):
     thumbnail_key = (manifest_entry or {}).get("thumbnail_key")
     cloud_image_url = _cloudfront_url_for_key(storage_key)
     cloud_thumb_url = _cloudfront_url_for_key(thumbnail_key) or cloud_image_url
-    if cloud_image_url:
+    # Use direct CDN URLs only when CloudFront is configured. Otherwise, route
+    # through API endpoints so private S3 objects can be served via presigned URLs.
+    if cloud_image_url and CLOUDFRONT_DOMAIN:
         return cloud_image_url, cloud_thumb_url
     return f"/api/images/{photo_name}", f"/api/thumbnails/{photo_name}"
 
