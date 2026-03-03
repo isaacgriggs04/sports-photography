@@ -4,9 +4,11 @@ import os
 import subprocess
 import sys
 import time
+import threading
 from tempfile import TemporaryDirectory
 from pathlib import Path
 from urllib.parse import urlparse
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import requests
 
@@ -51,6 +53,37 @@ def _parse_s3_bucket_name(raw_value):
 
 
 S3_UPLOADS_BUCKET = _parse_s3_bucket_name(S3_UPLOADS_BUCKET_RAW)
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ("/", "/health"):
+            body = b"ok\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, fmt, *args):
+        return
+
+
+def _start_health_server():
+    port_raw = os.getenv("PORT", "").strip()
+    if not port_raw:
+        return
+    try:
+        port = int(port_raw)
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        print(f"Worker health server listening on 0.0.0.0:{port}", flush=True)
+    except Exception as exc:
+        print(f"Failed to start worker health server on PORT={port_raw}: {exc}", flush=True)
 
 
 def _require_env(name, value):
@@ -174,6 +207,7 @@ def main():
 
     sqs = boto3.client("sqs", region_name=AWS_REGION)
     s3 = boto3.client("s3", region_name=AWS_REGION)
+    _start_health_server()
 
     print("Cloud cluster worker started")
     while True:
