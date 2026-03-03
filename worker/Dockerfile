@@ -4,11 +4,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PROJECT_ROOT=/app
 ENV CLUSTER_SCRIPT_PATH=update_web_clusters_combined.py
-ENV YOLO_MODEL_PATH=yolo26n.pt
+ENV YOLO_MODEL_PATH=yolo11n.pt
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
+    python3-dev \
     libglib2.0-0 \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*
