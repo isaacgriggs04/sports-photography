@@ -20,6 +20,5 @@ COPY worker/cloud_cluster_worker.py /app/worker/cloud_cluster_worker.py
 COPY update_web_clusters_combined.py /app/update_web_clusters_combined.py
 COPY face_body_cluster_pipeline.py /app/face_body_cluster_pipeline.py
 COPY debug_embedding_clustering_v2.py /app/debug_embedding_clustering_v2.py
-COPY yolo26n.pt /app/yolo26n.pt
 
 CMD ["python", "worker/cloud_cluster_worker.py"]
