@@ -14,6 +14,7 @@ from ultralytics import YOLO
 from face_body_cluster_pipeline import (
     _build_body_model,
     _build_face_app,
+    _opencv_safe_array,
     detect_people,
     extract_body_embedding,
     load_image_bgr,
@@ -590,9 +591,7 @@ def main():
                 crop_img = cv2.cvtColor(crop_img, cv2.COLOR_GRAY2BGR)
             if crop_img.ndim != 3 or crop_img.shape[2] != 3:
                 raise ValueError(f"invalid crop shape={getattr(crop_img, 'shape', None)}")
-            if crop_img.dtype != np.uint8:
-                crop_img = crop_img.astype(np.uint8, copy=False)
-            crop_img = np.ascontiguousarray(crop_img)
+            crop_img = _opencv_safe_array(crop_img)
             ok = cv2.imwrite(str(athlete_dir / crop_name), crop_img)
             if not ok:
                 print(f"WARN: cv2.imwrite returned False for {rec['photo']} crop index {i}", flush=True)

@@ -24,6 +24,8 @@ RUN pip install --no-cache-dir --retries 10 --timeout 300 \
 RUN pip install --no-cache-dir --retries 10 --timeout 300 -r /app/requirements-worker.txt
 # Ensure numpy/scipy ABI compatibility for sklearn/hdbscan import path.
 RUN pip install --no-cache-dir --force-reinstall numpy==1.26.4 scipy==1.11.4
+# Pin opencv to avoid upgrade to 4.11+ which can cause "Expected Ptr<cv::UMat>" with numpy arrays.
+RUN pip install --no-cache-dir --force-reinstall "opencv-python-headless==4.10.0.84"
 
 COPY worker/cloud_cluster_worker.py /app/worker/cloud_cluster_worker.py
 COPY update_web_clusters_combined.py /app/update_web_clusters_combined.py

@@ -32,6 +32,16 @@ from ultralytics import YOLO
 _YOLO_ERROR_LOGGED = {"mem": False, "list": False, "path": False}
 
 
+def _opencv_safe_array(arr: np.ndarray) -> np.ndarray:
+    """
+    Return a C-contiguous base numpy array safe for OpenCV C++ bindings.
+    Some environments (e.g. NumPy 2.x / OpenCV 4.11) reject views or
+    non-standard array layouts with 'Expected Ptr<cv::UMat>' errors.
+    """
+    out = np.array(arr, dtype=np.uint8, copy=True)
+    return np.ascontiguousarray(out)
+
+
 def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarray]:
     """
     Load an image as BGR uint8. Tries cv2.imread first, then byte-based decode.
@@ -83,7 +93,7 @@ def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarra
     if image.dtype != np.uint8:
         image = image.astype(np.uint8, copy=False)
 
-    return np.ascontiguousarray(image)
+    return _opencv_safe_array(image)
 
 
 def detect_people(
@@ -99,16 +109,18 @@ def detect_people(
     image_bgr = load_image_bgr(image_path, preloaded_image=image_bgr)
     if image_bgr is None:
         return []
+    # Ensure OpenCV-safe array (avoids "Expected Ptr<cv::UMat>" in some envs).
+    yolo_input = _opencv_safe_array(image_bgr)
     print(
         "YOLO input "
-        f"path={image_path} type={type(image_bgr)} shape={image_bgr.shape} "
-        f"dtype={image_bgr.dtype} contiguous={image_bgr.flags['C_CONTIGUOUS']}",
+        f"path={image_path} type={type(yolo_input)} shape={yolo_input.shape} "
+        f"dtype={yolo_input.dtype} contiguous={yolo_input.flags['C_CONTIGUOUS']}",
         flush=True,
     )
     try:
         # Primary path: run on in-memory array.
         results = yolo_model.predict(
-            source=image_bgr,
+            source=yolo_input,
             classes=[0],  # COCO class 0 = person
             conf=conf_threshold,
             verbose=False,
@@ -123,7 +135,7 @@ def detect_people(
         try:
             # Secondary path: list wrapper for ultralytics source parser.
             results = yolo_model.predict(
-                source=[image_bgr],
+                source=[yolo_input],
                 classes=[0],
                 conf=conf_threshold,
                 verbose=False,
@@ -152,7 +164,7 @@ def detect_people(
                     _YOLO_ERROR_LOGGED["path"] = True
                 print(f"YOLO detect failed for {image_path.name}; using full-frame fallback", flush=True)
                 # Hard fallback for environments where OpenCV bridge is broken.
-                h, w = image_bgr.shape[:2]
+                h, w = yolo_input.shape[:2]
                 if h <= 1 or w <= 1:
                     return []
                 return [
@@ -161,7 +173,7 @@ def detect_people(
                         "image_path": str(image_path),
                         "bbox_xyxy": [0, 0, w, h],
                         "confidence": 0.0,
-                        "body_crop_bgr": np.ascontiguousarray(image_bgr.astype(np.uint8, copy=False)),
+                        "body_crop_bgr": _opencv_safe_array(yolo_input),
                     }
                 ]
 
@@ -169,7 +181,7 @@ def detect_people(
     if results.boxes is None or len(results.boxes) == 0:
         return detections
 
-    h, w = image_bgr.shape[:2]
+    h, w = yolo_input.shape[:2]
     for box in results.boxes:
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().tolist()
         conf = float(box.conf[0].cpu().numpy())
@@ -182,10 +194,10 @@ def detect_people(
         if x2_i <= x1_i or y2_i <= y1_i:
             continue
 
-        body_crop = image_bgr[y1_i:y2_i, x1_i:x2_i]
+        body_crop = yolo_input[y1_i:y2_i, x1_i:x2_i]
         if body_crop.size == 0:
             continue
-        body_crop = np.ascontiguousarray(np.asarray(body_crop).astype(np.uint8, copy=False))
+        body_crop = _opencv_safe_array(body_crop)
 
         detections.append(
             {
@@ -358,7 +370,7 @@ def _build_body_model(device: torch.device):
     def preprocess(pil_img: Image.Image) -> torch.Tensor:
         img = pil_img.resize((128, 256), Image.Resampling.BILINEAR).convert("RGB")
         w, h = img.size
-        buf = torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes()))
+        buf = torch.from_numpy(np.frombuffer(img.tobytes(), dtype=np.uint8).copy())
         tensor = buf.view(h, w, 3).permute(2, 0, 1).to(dtype=torch.float32).div_(255.0)
         return (tensor - mean) / std
 
