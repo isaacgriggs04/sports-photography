@@ -842,7 +842,11 @@ function App() {
       if (clusterPollTimerRef.current) {
         clearTimeout(clusterPollTimerRef.current);
       }
-      pollClusterCompletion(selectedGame.game_id);
+      if (data?.job_id && token) {
+        pollCloudJobCompletion(data.job_id, selectedGame.game_id, token);
+      } else {
+        pollClusterCompletion(selectedGame.game_id);
+      }
       setSelectedCluster(null);
     } catch (err) {
       console.error(err);
