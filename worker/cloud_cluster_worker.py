@@ -52,7 +52,7 @@ def _parse_s3_bucket_name(raw_value):
     return value
 
 
-S3_UPLOADS_BUCKET = _parse_s3_bucket_name(S3_UPLOADS_BUCKET_RAW)
+S3_UPLOADS_BUCKET = _parse_s3_bucket_name(S3_UPLOADS_BUCKET_RAW )
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
