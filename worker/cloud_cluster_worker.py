@@ -166,9 +166,13 @@ def _run_clustering(local_files, workdir):
         timeout=1800,
         check=False,
     )
+    stdout_tail = (result.stdout or "")[-3000:]
+    stderr_tail = (result.stderr or "")[-3000:]
+    if stdout_tail:
+        print(f"[CLUSTER STDOUT TAIL] {stdout_tail}", flush=True)
+    if stderr_tail:
+        print(f"[CLUSTER STDERR TAIL] {stderr_tail}", flush=True)
     if result.returncode != 0:
-        stderr_tail = (result.stderr or "")[-2000:]
-        stdout_tail = (result.stdout or "")[-2000:]
         raise RuntimeError(
             f"Clustering command failed (code={result.returncode}). "
             f"stdout_tail={stdout_tail!r} stderr_tail={stderr_tail!r}"

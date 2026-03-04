@@ -529,8 +529,6 @@ def _cloudfront_url_for_key(key):
     if not key:
         return ""
     if not CLOUDFRONT_DOMAIN:
-        if S3_UPLOADS_BUCKET:
-            return f"https://{S3_UPLOADS_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key.lstrip('/')}"
         return ""
     return f"https://{CLOUDFRONT_DOMAIN.strip('/')}/{key.lstrip('/')}"
 

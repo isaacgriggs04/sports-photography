@@ -388,6 +388,23 @@ def main():
     yolo = YOLO(args.yolo_model)
     face_app = _build_face_app()
     number_ocr = _build_number_ocr()
+    face_enabled = face_app is not None
+    jersey_ocr_enabled = number_ocr is not None
+    if not face_enabled:
+        # Without face embeddings, body-only vectors are more error-prone on similar uniforms.
+        # Tighten merge/assign gates to reduce catastrophic over-merge.
+        args.merge_combined_cos = max(args.merge_combined_cos, 0.62)
+        args.assign_combined_cos = max(args.assign_combined_cos, 0.72)
+        args.assign_no_face_combined_cos = max(args.assign_no_face_combined_cos, 0.74)
+        print(
+            "[CLUSTER MODE] Face model unavailable; using stricter body-only thresholds: "
+            f"merge_combined_cos={args.merge_combined_cos} "
+            f"assign_combined_cos={args.assign_combined_cos} "
+            f"assign_no_face_combined_cos={args.assign_no_face_combined_cos}",
+            flush=True,
+        )
+    if not jersey_ocr_enabled:
+        print("[CLUSTER MODE] Jersey OCR unavailable; number-based merge bonus disabled.", flush=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     body_model, body_preprocess = _build_body_model(device)
 
@@ -397,6 +414,8 @@ def main():
     jersey_numbers = []
     jersey_confs = []
     crops = []
+    face_detection_count = 0
+    jersey_detection_count = 0
 
     print(f"Processing {len(image_paths)} images with combined face+body embeddings...")
     for idx, image_path in enumerate(image_paths, start=1):
@@ -446,12 +465,15 @@ def main():
             face_n = normalize(face_raw)
             fw, bw = adaptive_weights(face_score, face_ratio)
             emb = normalize(np.concatenate([fw * face_n, bw * body_n], axis=0))
+            face_detection_count += 1
         else:
             face_n = None
             zero_face = np.zeros_like(body_n, dtype=np.float32)
             emb = normalize(np.concatenate([zero_face, body_n], axis=0))
 
         jersey_num, jersey_conf = extract_jersey_number(crop, number_ocr)
+        if jersey_num is not None:
+            jersey_detection_count += 1
 
         records.append(
             {
@@ -520,6 +542,10 @@ def main():
             "detections": len(records),
             "clustered_detections": int(np.sum(labels != -1)),
             "clusters": len(cluster_ids),
+            "face_enabled": face_enabled,
+            "jersey_ocr_enabled": jersey_ocr_enabled,
+            "face_detections": face_detection_count,
+            "jersey_detections": jersey_detection_count,
             "method": "combined_face_body_adaptive",
             "clusterer": "hdbscan",
             "metric": "euclidean",
