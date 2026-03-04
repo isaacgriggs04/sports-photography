@@ -22,6 +22,8 @@ RUN pip install --no-cache-dir --retries 10 --timeout 300 \
     torch==2.5.1 torchvision==0.20.1 \
     --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir --retries 10 --timeout 300 -r /app/requirements-worker.txt
+# Ensure numpy/scipy ABI compatibility for sklearn/hdbscan import path.
+RUN pip install --no-cache-dir --force-reinstall numpy==1.26.4 scipy==1.11.4
 
 COPY worker/cloud_cluster_worker.py /app/worker/cloud_cluster_worker.py
 COPY update_web_clusters_combined.py /app/update_web_clusters_combined.py
