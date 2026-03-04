@@ -17,7 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-worker.txt /app/requirements-worker.txt
-RUN pip install --no-cache-dir -r /app/requirements-worker.txt
+# Install CPU-only torch wheels to avoid pulling huge CUDA runtime packages.
+RUN pip install --no-cache-dir --retries 10 --timeout 300 \
+    torch==2.5.1 torchvision==0.20.1 \
+    --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir --retries 10 --timeout 300 -r /app/requirements-worker.txt
 
 COPY worker/cloud_cluster_worker.py /app/worker/cloud_cluster_worker.py
 COPY update_web_clusters_combined.py /app/update_web_clusters_combined.py
