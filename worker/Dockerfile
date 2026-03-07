@@ -22,10 +22,17 @@ RUN pip install --no-cache-dir --retries 10 --timeout 300 \
     torch==2.5.1 torchvision==0.20.1 \
     --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir --retries 10 --timeout 300 -r /app/requirements-worker.txt
-# Ensure numpy/scipy ABI compatibility for sklearn/hdbscan import path.
-RUN pip install --no-cache-dir --force-reinstall numpy==1.26.4 scipy==1.11.4
-# Pin opencv to avoid upgrade to 4.11+ which can cause "Expected Ptr<cv::UMat>" with numpy arrays.
-RUN pip install --no-cache-dir --force-reinstall "opencv-python-headless==4.10.0.84"
+# Pin opencv without letting pip upgrade numpy underneath scipy/sklearn/hdbscan.
+RUN pip install --no-cache-dir --force-reinstall \
+    "opencv-python-headless==4.10.0.84" \
+    "numpy==1.26.4"
+# Reinstall ABI-sensitive wheels together so the final environment is internally consistent.
+RUN pip install --no-cache-dir --force-reinstall \
+    "numpy==1.26.4" \
+    "scipy==1.11.4" \
+    "scikit-learn==1.5.2" \
+    "hdbscan==0.8.39"
+RUN python -c "import hdbscan, numpy, scipy, sklearn; print({'numpy': numpy.__version__, 'scipy': scipy.__version__, 'sklearn': sklearn.__version__, 'hdbscan': getattr(hdbscan, '__version__', 'unknown')})"
 
 COPY worker/cloud_cluster_worker.py /app/worker/cloud_cluster_worker.py
 COPY update_web_clusters_combined.py /app/update_web_clusters_combined.py

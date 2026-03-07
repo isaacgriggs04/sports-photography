@@ -49,6 +49,12 @@ RUN pip install --no-cache-dir --force-reinstall numpy==1.26.4
 # runtime ABI incompatibilities in constrained container environments.
 RUN pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python || true
 RUN pip install --no-cache-dir --no-binary opencv-python-headless opencv-python-headless==4.10.0.84
+RUN pip install --no-cache-dir --force-reinstall \
+    "numpy==1.26.4" \
+    "scipy==1.12.0" \
+    "scikit-learn==1.4.2" \
+    "hdbscan==0.8.40"
+RUN python -c "import hdbscan, numpy, scipy, sklearn; print({'numpy': numpy.__version__, 'scipy': scipy.__version__, 'sklearn': sklearn.__version__, 'hdbscan': getattr(hdbscan, '__version__', 'unknown')})"
 
 COPY . /app
 COPY --from=frontend-build /frontend/dist /app/frontend/dist
