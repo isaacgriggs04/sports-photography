@@ -543,6 +543,87 @@ def _manifest_entry_for_photo(photo_name):
     return None
 
 
+def _purchase_counts_by_photo():
+    counts = {}
+    for purchase in _load_purchases():
+        for photo_name in purchase.get("photo_names") or []:
+            if not photo_name:
+                continue
+            counts[photo_name] = counts.get(photo_name, 0) + 1
+    return counts
+
+
+def _photo_has_purchase_history(photo_name):
+    return _purchase_counts_by_photo().get(photo_name, 0) > 0
+
+
+def _rebuild_cluster_stats(data):
+    athletes = data.get("athletes", {})
+    unclustered = data.get("unclustered", [])
+    photo_names = {
+        det.get("photo")
+        for dets in athletes.values()
+        for det in dets
+        if det.get("photo")
+    }
+    photo_names.update(det.get("photo") for det in unclustered if det.get("photo"))
+    return {
+        "images": len(photo_names),
+        "detections": sum(len(v) for v in athletes.values()) + len(unclustered),
+        "clustered_detections": sum(len(v) for v in athletes.values()),
+        "clusters": len(athletes),
+    }
+
+
+def _remove_photo_from_cluster_data(photo_name):
+    if not photo_name:
+        return 0
+
+    data = _load_cluster_data()
+    athletes = {}
+    removed = 0
+    for cluster_id, detections in data.get("athletes", {}).items():
+        kept = [det for det in detections if det.get("photo") != photo_name]
+        removed += len(detections) - len(kept)
+        if kept:
+            athletes[cluster_id] = kept
+
+    unclustered = data.get("unclustered", [])
+    kept_unclustered = [det for det in unclustered if det.get("photo") != photo_name]
+    removed += len(unclustered) - len(kept_unclustered)
+
+    data["athletes"] = athletes
+    data["unclustered"] = kept_unclustered
+    data["stats"] = _rebuild_cluster_stats(data)
+    _write_cluster_data(data)
+    return removed
+
+
+def _remove_photo_from_all_carts(photo_name):
+    if not photo_name:
+        return 0
+    carts = _load_carts()
+    changed = False
+    removed = 0
+    for user_id, items in list(carts.items()):
+        if not isinstance(items, list):
+            continue
+        kept = []
+        for item in items:
+            item_name = ""
+            if isinstance(item, dict):
+                item_name = str(item.get("image_url") or item.get("photo_name") or "").strip()
+            if item_name == photo_name:
+                removed += 1
+                changed = True
+                continue
+            kept.append(item)
+        carts[user_id] = kept
+    if changed:
+        _save_carts(carts)
+    return removed
+
+
 def _build_s3_get_url_for_key(key, expires=900):
     if not key or not S3_UPLOADS_BUCKET:
         return ""
@@ -2080,6 +2161,91 @@ def api_thumbnail(filename):
         if url:
             return redirect(url, code=302)
     return jsonify({"error": "Thumbnail not found"}), 404
+
+
+@app.route("/api/photographer/uploads", methods=["GET"])
+@require_auth
+def api_get_my_uploads():
+    user_id = getattr(request, "clerk_user_id", None)
+    if not user_id:
+        return jsonify({"error": "Not signed in"}), 401
+
+    manifest = _load_uploads_manifest()
+    purchase_counts = _purchase_counts_by_photo()
+    uploads = []
+    for entry in manifest:
+        if (entry.get("uploader_id") or "").strip() != user_id:
+            continue
+        filename = (entry.get("filename") or "").strip()
+        if not filename:
+            continue
+        image_path, thumb_path = _resolve_photo_urls(filename, entry)
+        purchase_count = int(purchase_counts.get(filename, 0))
+        uploads.append(
+            {
+                "filename": filename,
+                "image_url": filename,
+                "image_path": image_path,
+                "thumbnail_path": thumb_path,
+                "uploaded_at_unix": int(entry.get("uploaded_at_unix") or 0),
+                "game_id": str(entry.get("game_id") or ""),
+                "price": float(entry.get("price") or 5.0),
+                "purchase_count": purchase_count,
+                "can_delete": purchase_count == 0,
+            }
+        )
+
+    uploads.sort(key=lambda item: item.get("uploaded_at_unix", 0), reverse=True)
+    return jsonify({"uploads": uploads})
+
+
+@app.route("/api/photographer/uploads/<path:photo_name>", methods=["DELETE"])
+@require_auth
+def api_delete_my_upload(photo_name):
+    user_id = getattr(request, "clerk_user_id", None)
+    if not user_id:
+        return jsonify({"error": "Not signed in"}), 401
+
+    manifest = _load_uploads_manifest()
+    entry = next((item for item in manifest if (item.get("filename") or "").strip() == photo_name), None)
+    if not entry:
+        return jsonify({"error": "Photo not found"}), 404
+    if (entry.get("uploader_id") or "").strip() != user_id:
+        return jsonify({"error": "You can only delete your own uploads"}), 403
+    if _photo_has_purchase_history(photo_name):
+        return jsonify({"error": "This photo has already been purchased and cannot be deleted"}), 409
+
+    storage_keys = [
+        (entry.get("storage_key") or "").strip(),
+        (entry.get("thumbnail_key") or "").strip(),
+    ]
+    s3 = _s3_client()
+    if s3 is not None:
+        for key in storage_keys:
+            if not key:
+                continue
+            try:
+                s3.delete_object(Bucket=S3_UPLOADS_BUCKET, Key=key)
+            except Exception as exc:
+                return jsonify({"error": f"Failed to delete S3 object for {photo_name}: {exc}"}), 502
+
+    (PHOTO_DIR / photo_name).unlink(missing_ok=True)
+    THUMB_DIR.joinpath(Path(photo_name).name).unlink(missing_ok=True)
+    THUMB_DIR.joinpath(f"{Path(photo_name).stem}.jpg").unlink(missing_ok=True)
+
+    updated_manifest = [item for item in manifest if (item.get("filename") or "").strip() != photo_name]
+    _save_uploads_manifest(updated_manifest)
+    removed_cluster_refs = _remove_photo_from_cluster_data(photo_name)
+    removed_cart_refs = _remove_photo_from_all_carts(photo_name)
+
+    return jsonify(
+        {
+            "ok": True,
+            "deleted_photo": photo_name,
+            "removed_cluster_refs": removed_cluster_refs,
+            "removed_cart_refs": removed_cart_refs,
+        }
+    )
 
 
 @app.route("/api/photographer/photos", methods=["GET"])

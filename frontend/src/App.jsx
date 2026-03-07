@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, ChevronRight, Calendar, Camera, ArrowLeft, Trophy, X, Users, Upload, LogIn, LogOut, ShoppingCart, CheckCircle, Download, User, BarChart3, Settings, Instagram, Bell } from 'lucide-react';
+import { Search, ChevronRight, Calendar, Camera, ArrowLeft, Trophy, X, Users, Upload, LogIn, LogOut, ShoppingCart, CheckCircle, Download, User, BarChart3, Settings, Instagram, Bell, Trash2 } from 'lucide-react';
 import { SignedIn, SignedOut, SignInButton, useAuth, useClerk, useUser } from '@clerk/clerk-react';
 
 // Local: /api (Vite proxy) or 127.0.0.1:8080. Deployed: set VITE_API_BASE to your API URL (e.g. https://your-api.com:8080/api)
@@ -92,6 +92,10 @@ function App() {
   const [profilePackagesLoading, setProfilePackagesLoading] = useState(false);
   const [profilePackagesSaving, setProfilePackagesSaving] = useState(false);
   const [profilePackageSaveMessage, setProfilePackageSaveMessage] = useState('');
+  const [ownUploads, setOwnUploads] = useState([]);
+  const [ownUploadsLoading, setOwnUploadsLoading] = useState(false);
+  const [ownUploadsMessage, setOwnUploadsMessage] = useState('');
+  const [deletingUploadName, setDeletingUploadName] = useState('');
   const [salesStats, setSalesStats] = useState(null);
   const [cartQuote, setCartQuote] = useState(null);
   const [cartQuoteLoading, setCartQuoteLoading] = useState(false);
@@ -367,11 +371,15 @@ function App() {
       setSalesStats(null);
       setProfilePackageDeals([]);
       setProfilePackageSaveMessage('');
+      setOwnUploads([]);
+      setOwnUploadsLoading(false);
+      setOwnUploadsMessage('');
       return;
     }
     setProfileData(null);
     setSalesStats(null);
     setProfilePackagesLoading(true);
+    setOwnUploadsMessage('');
     fetch(`${API_BASE}/profile/${encodeURIComponent(viewingProfileUserId)}`)
       .then(r => r.json())
       .then(setProfileData)
@@ -392,7 +400,30 @@ function App() {
       })
       .catch(() => setProfilePackageDeals([{ quantity: '', package_price_cents: '' }]))
       .finally(() => setProfilePackagesLoading(false));
-  }, [viewingProfileUserId]);
+
+    if (viewingProfileUserId === user?.id && isSignedIn) {
+      setOwnUploadsLoading(true);
+      getToken()
+        .then((token) => {
+          if (!token) throw new Error('Missing auth token');
+          return fetchJsonWithFallback('/photographer/uploads', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        })
+        .then(({ res, data }) => {
+          if (!res.ok) throw new Error(data?.error || 'Failed to load uploads');
+          setOwnUploads(Array.isArray(data?.uploads) ? data.uploads : []);
+        })
+        .catch(() => {
+          setOwnUploads([]);
+          setOwnUploadsMessage('Unable to load your uploads right now.');
+        })
+        .finally(() => setOwnUploadsLoading(false));
+    } else {
+      setOwnUploads([]);
+      setOwnUploadsLoading(false);
+    }
+  }, [viewingProfileUserId, user?.id, isSignedIn, getToken]);
 
   // Sync Instagram edit field when profile data loads (for own profile)
   useEffect(() => {
@@ -658,6 +689,60 @@ function App() {
     const res = await fetch(`${API_BASE}/game/${gameId}/clusters`);
     const data = await res.json();
     setClusters(data);
+  };
+
+  const handleDeleteOwnUpload = async (photoName) => {
+    if (!photoName) return;
+    if (!window.confirm(`Delete ${photoName}? This cannot be undone.`)) return;
+    try {
+      const token = await getToken();
+      if (!token) {
+        setOwnUploadsMessage('Please sign in again to delete uploads.');
+        return;
+      }
+      setDeletingUploadName(photoName);
+      setOwnUploadsMessage('');
+      const { res, data } = await fetchJsonWithFallback(`/photographer/uploads/${encodeURIComponent(photoName)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(data?.error || 'Delete failed');
+      }
+
+      setOwnUploads((prev) => prev.filter((item) => item.filename !== photoName));
+      setCart((prev) => prev.filter((item) => item.image_url !== photoName));
+      setSelectedPhotos((prev) => prev.filter((item) => item.image_url !== photoName));
+      if (lightboxPhoto?.image_url === photoName) {
+        setLightboxPhoto(null);
+      }
+      if (salesStats && typeof salesStats.photos_uploaded === 'number') {
+        setSalesStats((prev) => (
+          prev
+            ? { ...prev, photos_uploaded: Math.max(0, (prev.photos_uploaded || 0) - 1) }
+            : prev
+        ));
+      }
+      if (selectedGame?.game_id) {
+        await refreshGameClusters(selectedGame.game_id);
+        if (selectedCluster?.cluster_id) {
+          const { res: clusterRes, data: clusterData } = await fetchJsonWithFallback(
+            `/clusters/${encodeURIComponent(selectedCluster.cluster_id)}?game_id=${selectedGame.game_id}`
+          );
+          if (clusterRes.ok) {
+            setSelectedCluster(clusterData);
+          } else if (clusterRes.status === 404) {
+            setSelectedCluster(null);
+            setStep(3);
+          }
+        }
+      }
+      setOwnUploadsMessage('Photo deleted.');
+    } catch (err) {
+      setOwnUploadsMessage(err?.message || 'Delete failed.');
+    } finally {
+      setDeletingUploadName('');
+    }
   };
 
   const pollClusterCompletion = async (gameId, attemptsLeft = 60) => {
@@ -1312,6 +1397,54 @@ function App() {
                   </div>
                 )}
               </div>
+
+              {viewingProfileUserId === user?.id && (
+                <div className="border-t border-gray-100 pt-6">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <h3 className="font-semibold text-gray-900">Your Uploads</h3>
+                    <span className="text-xs font-medium text-gray-500">{ownUploads.length} photo{ownUploads.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  {ownUploadsLoading ? (
+                    <p className="text-sm text-gray-500">Loading your uploads...</p>
+                  ) : ownUploads.length === 0 ? (
+                    <p className="text-sm text-gray-500">You have not uploaded any photos yet.</p>
+                  ) : (
+                    <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                      {ownUploads.map((photo) => (
+                        <div key={photo.filename} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
+                          <img
+                            src={resolveMediaUrl(photo.thumbnail_path || photo.image_path)}
+                            alt={photo.filename}
+                            className="w-16 h-16 rounded-lg object-cover bg-gray-200 flex-shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-gray-900 truncate">{photo.filename}</p>
+                            <p className="text-xs text-gray-500">
+                              ${Number(photo.price ?? 5).toFixed(2)}
+                              {photo.purchase_count > 0 ? ` • ${photo.purchase_count} purchase${photo.purchase_count !== 1 ? 's' : ''}` : ' • Not purchased'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteOwnUpload(photo.filename)}
+                            disabled={!photo.can_delete || deletingUploadName === photo.filename}
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={photo.can_delete ? 'Delete this upload' : 'Purchased photos cannot be deleted'}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            {deletingUploadName === photo.filename ? 'Deleting...' : (photo.can_delete ? 'Delete' : 'Locked')}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {ownUploadsMessage && (
+                    <p className={`text-xs mt-3 ${ownUploadsMessage === 'Photo deleted.' ? 'text-green-600' : 'text-red-600'}`}>
+                      {ownUploadsMessage}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Manage account (own profile only) */}
               {viewingProfileUserId === user?.id && (
