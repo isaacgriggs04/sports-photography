@@ -96,6 +96,7 @@ function App() {
   const [ownUploadsLoading, setOwnUploadsLoading] = useState(false);
   const [ownUploadsMessage, setOwnUploadsMessage] = useState('');
   const [deletingUploadName, setDeletingUploadName] = useState('');
+  const [selectedOwnUploadNames, setSelectedOwnUploadNames] = useState([]);
   const [salesStats, setSalesStats] = useState(null);
   const [cartQuote, setCartQuote] = useState(null);
   const [cartQuoteLoading, setCartQuoteLoading] = useState(false);
@@ -374,6 +375,7 @@ function App() {
       setOwnUploads([]);
       setOwnUploadsLoading(false);
       setOwnUploadsMessage('');
+      setSelectedOwnUploadNames([]);
       return;
     }
     setProfileData(null);
@@ -413,15 +415,18 @@ function App() {
         .then(({ res, data }) => {
           if (!res.ok) throw new Error(data?.error || 'Failed to load uploads');
           setOwnUploads(Array.isArray(data?.uploads) ? data.uploads : []);
+          setSelectedOwnUploadNames([]);
         })
         .catch(() => {
           setOwnUploads([]);
           setOwnUploadsMessage('Unable to load your uploads right now.');
+          setSelectedOwnUploadNames([]);
         })
         .finally(() => setOwnUploadsLoading(false));
     } else {
       setOwnUploads([]);
       setOwnUploadsLoading(false);
+      setSelectedOwnUploadNames([]);
     }
   }, [viewingProfileUserId, user?.id, isSignedIn, getToken]);
 
@@ -691,58 +696,120 @@ function App() {
     setClusters(data);
   };
 
-  const handleDeleteOwnUpload = async (photoName) => {
-    if (!photoName) return;
-    if (!window.confirm(`Delete ${photoName}? This cannot be undone.`)) return;
+  const toggleOwnUploadSelection = (photoName, checked) => {
+    setSelectedOwnUploadNames((prev) => {
+      if (checked) {
+        return prev.includes(photoName) ? prev : [...prev, photoName];
+      }
+      return prev.filter((name) => name !== photoName);
+    });
+  };
+
+  const selectAllDeletableOwnUploads = () => {
+    const deletable = ownUploads.filter((photo) => photo.can_delete).map((photo) => photo.filename);
+    setSelectedOwnUploadNames(deletable);
+  };
+
+  const clearOwnUploadSelection = () => {
+    setSelectedOwnUploadNames([]);
+  };
+
+  const applyDeletedOwnUploads = async (deletedNames) => {
+    if (!deletedNames.length) return;
+    const deletedSet = new Set(deletedNames);
+    setOwnUploads((prev) => prev.filter((item) => !deletedSet.has(item.filename)));
+    setSelectedOwnUploadNames((prev) => prev.filter((name) => !deletedSet.has(name)));
+    setCart((prev) => prev.filter((item) => !deletedSet.has(item.image_url)));
+    setSelectedPhotos((prev) => prev.filter((item) => !deletedSet.has(item.image_url)));
+    if (lightboxPhoto?.image_url && deletedSet.has(lightboxPhoto.image_url)) {
+      setLightboxPhoto(null);
+    }
+    if (salesStats && typeof salesStats.photos_uploaded === 'number') {
+      setSalesStats((prev) => (
+        prev
+          ? { ...prev, photos_uploaded: Math.max(0, (prev.photos_uploaded || 0) - deletedNames.length) }
+          : prev
+      ));
+    }
+    if (selectedGame?.game_id) {
+      await refreshGameClusters(selectedGame.game_id);
+      if (selectedCluster?.cluster_id) {
+        const { res: clusterRes, data: clusterData } = await fetchJsonWithFallback(
+          `/clusters/${encodeURIComponent(selectedCluster.cluster_id)}?game_id=${selectedGame.game_id}`
+        );
+        if (clusterRes.ok) {
+          setSelectedCluster(clusterData);
+        } else if (clusterRes.status === 404) {
+          setSelectedCluster(null);
+          setStep(3);
+        }
+      }
+    }
+  };
+
+  const deleteOwnUploads = async (photoNames) => {
+    const uniqueNames = Array.from(new Set((photoNames || []).filter(Boolean)));
+    if (!uniqueNames.length) return;
     try {
       const token = await getToken();
       if (!token) {
         setOwnUploadsMessage('Please sign in again to delete uploads.');
         return;
       }
-      setDeletingUploadName(photoName);
+      setDeletingUploadName(uniqueNames.length === 1 ? uniqueNames[0] : '__bulk__');
       setOwnUploadsMessage('');
-      const { res, data } = await fetchJsonWithFallback(`/photographer/uploads/${encodeURIComponent(photoName)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        throw new Error(data?.error || 'Delete failed');
+      if (uniqueNames.length === 1) {
+        const photoName = uniqueNames[0];
+        const { res, data } = await fetchJsonWithFallback(`/photographer/uploads/${encodeURIComponent(photoName)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          throw new Error(data?.error || 'Delete failed');
+        }
+        await applyDeletedOwnUploads([photoName]);
+        setOwnUploadsMessage('Photo deleted.');
+        return;
       }
 
-      setOwnUploads((prev) => prev.filter((item) => item.filename !== photoName));
-      setCart((prev) => prev.filter((item) => item.image_url !== photoName));
-      setSelectedPhotos((prev) => prev.filter((item) => item.image_url !== photoName));
-      if (lightboxPhoto?.image_url === photoName) {
-        setLightboxPhoto(null);
+      const { res, data } = await fetchJsonWithFallback('/photographer/uploads/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ photo_names: uniqueNames }),
+      });
+      if (!res.ok) {
+        throw new Error(data?.error || 'Bulk delete failed');
       }
-      if (salesStats && typeof salesStats.photos_uploaded === 'number') {
-        setSalesStats((prev) => (
-          prev
-            ? { ...prev, photos_uploaded: Math.max(0, (prev.photos_uploaded || 0) - 1) }
-            : prev
-        ));
+      const deletedNames = Array.isArray(data?.deleted) ? data.deleted : [];
+      await applyDeletedOwnUploads(deletedNames);
+      const failed = Array.isArray(data?.results) ? data.results.filter((item) => !item.ok) : [];
+      if (failed.length) {
+        const firstError = failed[0]?.error || 'Some deletes failed.';
+        setOwnUploadsMessage(
+          deletedNames.length
+            ? `${deletedNames.length} photo${deletedNames.length !== 1 ? 's' : ''} deleted. ${failed.length} failed: ${firstError}`
+            : firstError
+        );
+      } else {
+        setOwnUploadsMessage(`${deletedNames.length} photo${deletedNames.length !== 1 ? 's' : ''} deleted.`);
       }
-      if (selectedGame?.game_id) {
-        await refreshGameClusters(selectedGame.game_id);
-        if (selectedCluster?.cluster_id) {
-          const { res: clusterRes, data: clusterData } = await fetchJsonWithFallback(
-            `/clusters/${encodeURIComponent(selectedCluster.cluster_id)}?game_id=${selectedGame.game_id}`
-          );
-          if (clusterRes.ok) {
-            setSelectedCluster(clusterData);
-          } else if (clusterRes.status === 404) {
-            setSelectedCluster(null);
-            setStep(3);
-          }
-        }
-      }
-      setOwnUploadsMessage('Photo deleted.');
     } catch (err) {
       setOwnUploadsMessage(err?.message || 'Delete failed.');
     } finally {
       setDeletingUploadName('');
     }
+  };
+
+  const handleDeleteOwnUpload = async (photoName) => {
+    if (!photoName) return;
+    if (!window.confirm(`Delete ${photoName}? This cannot be undone.`)) return;
+    await deleteOwnUploads([photoName]);
+  };
+
+  const handleBulkDeleteOwnUploads = async () => {
+    if (!selectedOwnUploadNames.length) return;
+    if (!window.confirm(`Delete ${selectedOwnUploadNames.length} selected photo(s)? This cannot be undone.`)) return;
+    await deleteOwnUploads(selectedOwnUploadNames);
   };
 
   const pollClusterCompletion = async (gameId, attemptsLeft = 60) => {
@@ -1409,9 +1476,44 @@ function App() {
                   ) : ownUploads.length === 0 ? (
                     <p className="text-sm text-gray-500">You have not uploaded any photos yet.</p>
                   ) : (
-                    <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={selectAllDeletableOwnUploads}
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-[#e53935]/30 hover:bg-[#e53935]/5 transition-colors"
+                        >
+                          Select all deletable
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearOwnUploadSelection}
+                          disabled={!selectedOwnUploadNames.length}
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-gray-300 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Clear selection
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleBulkDeleteOwnUploads}
+                          disabled={!selectedOwnUploadNames.length || deletingUploadName === '__bulk__'}
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          {deletingUploadName === '__bulk__' ? 'Deleting...' : `Delete selected (${selectedOwnUploadNames.length})`}
+                        </button>
+                      </div>
+                      <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                       {ownUploads.map((photo) => (
                         <div key={photo.filename} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
+                          <input
+                            type="checkbox"
+                            checked={selectedOwnUploadNames.includes(photo.filename)}
+                            disabled={!photo.can_delete || deletingUploadName === '__bulk__'}
+                            onChange={(e) => toggleOwnUploadSelection(photo.filename, e.target.checked)}
+                            className="w-4 h-4 rounded border-gray-300 text-[#e53935] focus:ring-[#e53935] disabled:opacity-50"
+                            aria-label={`Select ${photo.filename}`}
+                          />
                           <img
                             src={resolveMediaUrl(photo.thumbnail_path || photo.image_path)}
                             alt={photo.filename}
@@ -1427,7 +1529,7 @@ function App() {
                           <button
                             type="button"
                             onClick={() => handleDeleteOwnUpload(photo.filename)}
-                            disabled={!photo.can_delete || deletingUploadName === photo.filename}
+                            disabled={!photo.can_delete || deletingUploadName === photo.filename || deletingUploadName === '__bulk__'}
                             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
                             title={photo.can_delete ? 'Delete this upload' : 'Purchased photos cannot be deleted'}
                           >
@@ -1436,10 +1538,11 @@ function App() {
                           </button>
                         </div>
                       ))}
+                      </div>
                     </div>
                   )}
                   {ownUploadsMessage && (
-                    <p className={`text-xs mt-3 ${ownUploadsMessage === 'Photo deleted.' ? 'text-green-600' : 'text-red-600'}`}>
+                    <p className={`text-xs mt-3 ${ownUploadsMessage.toLowerCase().includes('deleted') ? 'text-green-600' : 'text-red-600'}`}>
                       {ownUploadsMessage}
                     </p>
                   )}

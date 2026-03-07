@@ -2199,21 +2199,15 @@ def api_get_my_uploads():
     return jsonify({"uploads": uploads})
 
 
-@app.route("/api/photographer/uploads/<path:photo_name>", methods=["DELETE"])
-@require_auth
-def api_delete_my_upload(photo_name):
-    user_id = getattr(request, "clerk_user_id", None)
-    if not user_id:
-        return jsonify({"error": "Not signed in"}), 401
-
+def _delete_uploaded_photo_for_user(user_id, photo_name):
     manifest = _load_uploads_manifest()
     entry = next((item for item in manifest if (item.get("filename") or "").strip() == photo_name), None)
     if not entry:
-        return jsonify({"error": "Photo not found"}), 404
+        return {"ok": False, "status": 404, "error": "Photo not found"}
     if (entry.get("uploader_id") or "").strip() != user_id:
-        return jsonify({"error": "You can only delete your own uploads"}), 403
+        return {"ok": False, "status": 403, "error": "You can only delete your own uploads"}
     if _photo_has_purchase_history(photo_name):
-        return jsonify({"error": "This photo has already been purchased and cannot be deleted"}), 409
+        return {"ok": False, "status": 409, "error": "This photo has already been purchased and cannot be deleted"}
 
     storage_keys = [
         (entry.get("storage_key") or "").strip(),
@@ -2227,7 +2221,7 @@ def api_delete_my_upload(photo_name):
             try:
                 s3.delete_object(Bucket=S3_UPLOADS_BUCKET, Key=key)
             except Exception as exc:
-                return jsonify({"error": f"Failed to delete S3 object for {photo_name}: {exc}"}), 502
+                return {"ok": False, "status": 502, "error": f"Failed to delete S3 object for {photo_name}: {exc}"}
 
     (PHOTO_DIR / photo_name).unlink(missing_ok=True)
     THUMB_DIR.joinpath(Path(photo_name).name).unlink(missing_ok=True)
@@ -2237,13 +2231,54 @@ def api_delete_my_upload(photo_name):
     _save_uploads_manifest(updated_manifest)
     removed_cluster_refs = _remove_photo_from_cluster_data(photo_name)
     removed_cart_refs = _remove_photo_from_all_carts(photo_name)
+    return {
+        "ok": True,
+        "deleted_photo": photo_name,
+        "removed_cluster_refs": removed_cluster_refs,
+        "removed_cart_refs": removed_cart_refs,
+    }
+
+
+@app.route("/api/photographer/uploads/<path:photo_name>", methods=["DELETE"])
+@require_auth
+def api_delete_my_upload(photo_name):
+    user_id = getattr(request, "clerk_user_id", None)
+    if not user_id:
+        return jsonify({"error": "Not signed in"}), 401
+    result = _delete_uploaded_photo_for_user(user_id, photo_name)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error", "Delete failed")}), int(result.get("status", 500))
+    return jsonify(result)
+
+
+@app.route("/api/photographer/uploads/bulk-delete", methods=["POST"])
+@require_auth
+def api_bulk_delete_my_uploads():
+    user_id = getattr(request, "clerk_user_id", None)
+    if not user_id:
+        return jsonify({"error": "Not signed in"}), 401
+
+    data = request.get_json() or {}
+    photo_names = data.get("photo_names") or []
+    if not isinstance(photo_names, list) or not photo_names:
+        return jsonify({"error": "Missing photo_names"}), 400
+
+    results = []
+    deleted = []
+    for raw_name in photo_names[:500]:
+        photo_name = str(raw_name or "").strip()
+        if not photo_name:
+            continue
+        result = _delete_uploaded_photo_for_user(user_id, photo_name)
+        results.append({"photo_name": photo_name, **result})
+        if result.get("ok"):
+            deleted.append(photo_name)
 
     return jsonify(
         {
             "ok": True,
-            "deleted_photo": photo_name,
-            "removed_cluster_refs": removed_cluster_refs,
-            "removed_cart_refs": removed_cart_refs,
+            "deleted": deleted,
+            "results": results,
         }
     )
 
