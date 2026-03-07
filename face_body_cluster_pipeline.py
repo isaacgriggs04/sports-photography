@@ -2,7 +2,7 @@
 Face + body player clustering pipeline for small sports image batches.
 
 Pipeline:
-1) Detect people with YOLOv26 (yolo26n.pt)
+1) Detect people with YOLO11 medium (yolo11m.pt)
 2) Crop body for each detected person
 3) Try to detect a face inside the body crop (InsightFace / ArcFace)
 4) Always extract a body embedding (OSNet via torchreid)
@@ -409,8 +409,8 @@ def main():
     )
     parser.add_argument(
         "--yolo-model",
-        default="yolo26n.pt",
-        help="YOLOv26 model name/path (default: yolo26n.pt).",
+        default="yolo11m.pt",
+        help="YOLO11 model name/path (default: yolo11m.pt).",
     )
     parser.add_argument(
         "--conf-threshold",

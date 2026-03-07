@@ -200,7 +200,7 @@ def silhouette_if_valid(emb: np.ndarray, labels: np.ndarray) -> Optional[float]:
 def run():
     parser = argparse.ArgumentParser(description="V2 debug script for face/body athlete clustering.")
     parser.add_argument("--images-dir", default="game_photos")
-    parser.add_argument("--yolo-model", default="yolo26n.pt")
+    parser.add_argument("--yolo-model", default="yolo11m.pt")
     parser.add_argument("--conf-threshold", type=float, default=0.25)
     parser.add_argument("--min-w", type=int, default=80)
     parser.add_argument("--min-h", type=int, default=140)

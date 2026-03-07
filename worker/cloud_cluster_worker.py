@@ -24,7 +24,7 @@ API_INTERNAL_BASE = os.getenv("API_INTERNAL_BASE", "http://127.0.0.1:8080").rstr
 WORKER_SHARED_SECRET = os.getenv("WORKER_SHARED_SECRET", "").strip()
 PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", ".")).resolve()
 CLUSTER_SCRIPT_PATH = os.getenv("CLUSTER_SCRIPT_PATH", "update_web_clusters_combined.py").strip()
-YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "yolo26n.pt").strip()
+YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "yolo11m.pt").strip()
 
 
 def _parse_s3_bucket_name(raw_value):

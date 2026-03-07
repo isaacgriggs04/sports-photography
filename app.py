@@ -276,7 +276,7 @@ def _get_ml_models():
             from face_body_cluster_pipeline import _build_body_model, _build_face_app
 
             _ML_MODELS["device"] = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            _ML_MODELS["yolo"] = YOLO("yolo11n.pt")
+            _ML_MODELS["yolo"] = YOLO("yolo11m.pt")
             _ML_MODELS["face_app"] = _build_face_app()
             _ML_MODELS["body_model"], _ML_MODELS["body_preprocess"] = _build_body_model(_ML_MODELS["device"])
             print("ML models loaded and cached")

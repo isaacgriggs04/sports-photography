@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import traceback
 from pathlib import Path
 
 import cv2
@@ -32,7 +33,7 @@ from debug_embedding_clustering_v2 import (
 def parse_args():
     p = argparse.ArgumentParser(description="Update athlete_groups.json using combined face+body embeddings.")
     p.add_argument("--images-dir", default="game_photos")
-    p.add_argument("--yolo-model", default="yolo11n.pt")
+    p.add_argument("--yolo-model", default="yolo11m.pt")
     p.add_argument("--min-cluster-size", type=int, default=2)
     p.add_argument("--min-samples", type=int, default=1)
     p.add_argument("--merge-combined-cos", type=float, default=0.50)
@@ -43,6 +44,7 @@ def parse_args():
     p.add_argument("--assign-no-face-combined-cos", type=float, default=0.62)
     p.add_argument("--number-conf-thres", type=float, default=0.7)
     p.add_argument("--number-match-bonus", type=float, default=0.03)
+    p.add_argument("--number-mismatch-penalty", type=float, default=0.03)
     p.add_argument("--conf-threshold", type=float, default=0.25)
     p.add_argument("--output-json", default="athlete_groups.json")
     p.add_argument("--output-crops-dir", default="athlete_groups")
@@ -67,6 +69,7 @@ def _safe_merge_labels(
     face_cos_threshold: float,
     number_conf_thres: float,
     number_match_bonus: float,
+    number_mismatch_penalty: float,
 ) -> np.ndarray:
     """
     Merge micro-clusters conservatively:
@@ -147,8 +150,10 @@ def _safe_merge_labels(
         local_threshold = combined_cos_threshold
         if na is not None and nb is not None and na == nb:
             local_threshold = max(0.0, combined_cos_threshold - number_match_bonus)
-            if sim < local_threshold:
-                continue
+        elif na is not None and nb is not None and na != nb:
+            local_threshold = min(0.99, combined_cos_threshold + number_mismatch_penalty)
+        if sim < local_threshold:
+            continue
 
         union(a, b)
 
@@ -178,6 +183,7 @@ def _prototype_reassign_labels(
     assign_no_face_combined_cos: float,
     number_conf_thres: float,
     number_match_bonus: float,
+    number_mismatch_penalty: float,
 ) -> np.ndarray:
     """
     Reassign only currently-unclustered detections to existing clusters if:
@@ -244,6 +250,8 @@ def _prototype_reassign_labels(
         ):
             if item_num == target_num:
                 min_combined = max(0.0, min_combined - number_match_bonus)
+            else:
+                min_combined = min(0.99, min_combined + number_mismatch_penalty)
 
         if best_sim < min_combined:
             continue
@@ -264,18 +272,34 @@ def _prototype_reassign_labels(
 
 
 def _build_number_ocr():
-    # Disable online model source checks after first download to reduce startup overhead.
+    # PaddleOCR requires PaddlePaddle at runtime, and its init kwargs differ across 2.x/3.x.
     try:
+        import paddle
         from paddleocr import PaddleOCR
 
-        return PaddleOCR(
-            lang="en",
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
+        print(
+            f"[JERSEY OCR] Initializing PaddleOCR with paddle={getattr(paddle, '__version__', 'unknown')}",
+            flush=True,
         )
+        try:
+            # Newer PaddleOCR init surface.
+            return PaddleOCR(
+                lang="en",
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+            )
+        except TypeError as exc:
+            if "unexpected keyword" not in str(exc):
+                raise
+            print(f"[JERSEY OCR] Falling back to PaddleOCR legacy init: {exc}", flush=True)
+            return PaddleOCR(
+                lang="en",
+                use_angle_cls=False,
+                show_log=False,
+            )
     except Exception as exc:
-        print(f"Jersey OCR disabled: {exc}")
+        print(f"Jersey OCR disabled: {type(exc).__name__}: {exc}\n{traceback.format_exc()}", flush=True)
         return None
 
 
@@ -518,6 +542,7 @@ def main():
         face_cos_threshold=args.merge_face_cos,
         number_conf_thres=args.number_conf_thres,
         number_match_bonus=args.number_match_bonus,
+        number_mismatch_penalty=args.number_mismatch_penalty,
     )
     labels = _prototype_reassign_labels(
         labels=labels,
@@ -531,6 +556,7 @@ def main():
         assign_no_face_combined_cos=args.assign_no_face_combined_cos,
         number_conf_thres=args.number_conf_thres,
         number_match_bonus=args.number_match_bonus,
+        number_mismatch_penalty=args.number_mismatch_penalty,
     )
 
     cluster_ids = sorted([int(l) for l in set(labels.tolist()) if l != -1])
@@ -562,6 +588,7 @@ def main():
             "assign_no_face_combined_cos": args.assign_no_face_combined_cos,
             "number_conf_thres": args.number_conf_thres,
             "number_match_bonus": args.number_match_bonus,
+            "number_mismatch_penalty": args.number_mismatch_penalty,
         },
     }
 
