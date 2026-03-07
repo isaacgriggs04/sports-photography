@@ -9,12 +9,13 @@ import cv2
 import hdbscan
 import numpy as np
 import torch
+from PIL import Image
 from ultralytics import YOLO
 
 from face_body_cluster_pipeline import (
     _build_body_model,
     _build_face_app,
-    _opencv_safe_array,
+    _ensure_bgr_uint8,
     detect_people,
     extract_body_embedding,
     load_image_bgr,
@@ -337,7 +338,12 @@ def extract_jersey_number(body_crop_bgr: np.ndarray, number_ocr):
     max_side = max(h, w)
     if max_side > 960:
         scale = 960.0 / max_side
-        roi = cv2.resize(roi, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+        try:
+            roi = cv2.resize(roi, new_size, interpolation=cv2.INTER_AREA)
+        except Exception:
+            pil_roi = Image.fromarray(roi[:, :, ::-1].copy())
+            roi = np.asarray(pil_roi.resize(new_size, Image.Resampling.BILINEAR), dtype=np.uint8)[:, :, ::-1].copy()
 
     # Use predict() to avoid deprecated warnings.
     try:
@@ -438,18 +444,13 @@ def main():
         det = pick_largest_detection(detections)
         crop = det.get("body_crop_bgr")
         try:
-            crop = np.asarray(crop)
-            if crop.ndim == 2:
-                crop = cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR)
-            if crop.ndim != 3 or crop.shape[2] != 3:
+            crop = _ensure_bgr_uint8(crop)
+            if crop is None:
                 print(
                     f"Skipping {image_path.name}: invalid crop shape={getattr(crop, 'shape', None)}",
                     flush=True,
                 )
                 continue
-            if crop.dtype != np.uint8:
-                crop = crop.astype(np.uint8, copy=False)
-            crop = np.ascontiguousarray(crop)
         except Exception as exc:
             print(f"Skipping {image_path.name}: crop normalization failed: {exc}", flush=True)
             continue
@@ -586,15 +587,11 @@ def main():
         athlete_dir.mkdir(parents=True, exist_ok=True)
         crop_name = f"{Path(rec['photo']).stem}_det{i+1}.jpg"
         try:
-            crop_img = np.asarray(crops[i])
-            if crop_img.ndim == 2:
-                crop_img = cv2.cvtColor(crop_img, cv2.COLOR_GRAY2BGR)
-            if crop_img.ndim != 3 or crop_img.shape[2] != 3:
+            crop_img = _ensure_bgr_uint8(crops[i])
+            if crop_img is None:
                 raise ValueError(f"invalid crop shape={getattr(crop_img, 'shape', None)}")
-            crop_img = _opencv_safe_array(crop_img)
-            ok = cv2.imwrite(str(athlete_dir / crop_name), crop_img)
-            if not ok:
-                print(f"WARN: cv2.imwrite returned False for {rec['photo']} crop index {i}", flush=True)
+            crop_rgb = crop_img[:, :, ::-1].copy()
+            Image.fromarray(crop_rgb).save(athlete_dir / crop_name, format="JPEG", quality=95)
         except Exception as exc:
             # Crop artifact write failures should not fail clustering output generation.
             print(f"WARN: failed to write crop for {rec['photo']} index {i}: {exc}", flush=True)

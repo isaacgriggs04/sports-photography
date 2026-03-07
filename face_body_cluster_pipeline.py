@@ -32,6 +32,28 @@ from ultralytics import YOLO
 _YOLO_ERROR_LOGGED = {"mem": False, "list": False, "path": False}
 
 
+def _ensure_bgr_uint8(arr) -> Optional[np.ndarray]:
+    """
+    Normalize array-like image input into a contiguous BGR uint8 ndarray.
+    Uses NumPy only so it remains usable even if OpenCV's ndarray bridge is unstable.
+    """
+    try:
+        out = np.asarray(arr)
+    except Exception:
+        return None
+    if out.ndim == 2:
+        out = np.repeat(out[:, :, None], 3, axis=2)
+    elif out.ndim == 3 and out.shape[2] == 1:
+        out = np.repeat(out, 3, axis=2)
+    elif out.ndim == 3 and out.shape[2] >= 4:
+        out = out[:, :, :3]
+    if out.ndim != 3 or out.shape[2] != 3:
+        return None
+    if out.dtype != np.uint8:
+        out = out.astype(np.uint8, copy=False)
+    return np.ascontiguousarray(out)
+
+
 def _opencv_safe_array(arr: np.ndarray) -> np.ndarray:
     """
     Return a C-contiguous base numpy array safe for OpenCV C++ bindings.
@@ -44,7 +66,7 @@ def _opencv_safe_array(arr: np.ndarray) -> np.ndarray:
 
 def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarray]:
     """
-    Load an image as BGR uint8. Tries cv2.imread first, then byte-based decode.
+    Load an image as BGR uint8. Prefer PIL to avoid OpenCV<->NumPy bridge issues.
     Returns None if unreadable.
     """
     image = preloaded_image
@@ -56,13 +78,16 @@ def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarra
         image = None
 
     if image is None:
-        image = cv2.imread(str(image_path))
+        try:
+            with Image.open(image_path) as pil_img:
+                rgb = np.asarray(pil_img.convert("RGB"), dtype=np.uint8)
+            image = rgb[:, :, ::-1].copy()
+        except Exception:
+            image = None
 
     if image is None:
         try:
-            with open(image_path, "rb") as f:
-                buf = np.frombuffer(f.read(), dtype=np.uint8)
-            image = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+            image = cv2.imread(str(image_path))
         except Exception:
             image = None
 
@@ -75,12 +100,11 @@ def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarra
         )
         return None
 
-    image = np.asarray(image)
-    if image.ndim == 2:
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    if image.ndim != 3 or image.shape[2] != 3:
+    raw_shape = getattr(image, "shape", None)
+    image = _ensure_bgr_uint8(image)
+    if image is None:
         print(
-            f"Image shape invalid for {image_path}: shape={getattr(image, 'shape', None)}",
+            f"Image shape invalid for {image_path}: shape={raw_shape}",
             flush=True,
         )
         return None
@@ -90,9 +114,6 @@ def load_image_bgr(image_path: Path, preloaded_image=None) -> Optional[np.ndarra
             flush=True,
         )
         return None
-    if image.dtype != np.uint8:
-        image = image.astype(np.uint8, copy=False)
-
     return _opencv_safe_array(image)
 
 
@@ -183,8 +204,8 @@ def detect_people(
 
     h, w = yolo_input.shape[:2]
     for box in results.boxes:
-        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().tolist()
-        conf = float(box.conf[0].cpu().numpy())
+        x1, y1, x2, y2 = box.xyxy[0].detach().cpu().tolist()
+        conf = float(box.conf[0].detach().cpu().item())
 
         # Clamp coordinates to image bounds.
         x1_i = max(0, min(w - 1, int(x1)))
@@ -248,14 +269,9 @@ def extract_body_embedding(
     """
     Extract body embedding using pretrained OSNet.
     """
-    arr = np.asarray(body_crop_bgr)
-    if arr.ndim == 2:
-        arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
-    if arr.ndim != 3 or arr.shape[2] != 3:
+    arr = _ensure_bgr_uint8(body_crop_bgr)
+    if arr is None:
         raise ValueError(f"Invalid body crop shape for embedding: {getattr(arr, 'shape', None)}")
-    if arr.dtype != np.uint8:
-        arr = arr.astype(np.uint8, copy=False)
-    arr = np.ascontiguousarray(arr)
     # Avoid cv2 color conversion in environments where OpenCV bridge is unstable.
     crop_rgb = arr[:, :, ::-1].copy()
     pil_img = Image.fromarray(crop_rgb)
@@ -266,7 +282,7 @@ def extract_body_embedding(
     # torchreid OSNet may return tensor or tuple/list; keep first tensor.
     if isinstance(feat, (tuple, list)):
         feat = feat[0]
-    emb = feat.detach().cpu().numpy().reshape(-1).astype(np.float32)
+    emb = np.asarray(feat.detach().cpu().reshape(-1).to(dtype=torch.float32).tolist(), dtype=np.float32)
     return emb
 
 
@@ -370,7 +386,7 @@ def _build_body_model(device: torch.device):
     def preprocess(pil_img: Image.Image) -> torch.Tensor:
         img = pil_img.resize((128, 256), Image.Resampling.BILINEAR).convert("RGB")
         w, h = img.size
-        buf = torch.from_numpy(np.frombuffer(img.tobytes(), dtype=np.uint8).copy())
+        buf = torch.tensor(bytearray(img.tobytes()), dtype=torch.uint8)
         tensor = buf.view(h, w, 3).permute(2, 0, 1).to(dtype=torch.float32).div_(255.0)
         return (tensor - mean) / std
 
