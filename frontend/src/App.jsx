@@ -8,7 +8,7 @@ const API_BASE_FALLBACK = 'http://127.0.0.1:8080/api';
 const API_HOST = '';
 const GUEST_CART_STORAGE_KEY = 'sportspic_cart_guest';
 const LEGACY_CART_STORAGE_KEY = 'sportspic_cart';
-const MAX_UPLOAD_FILE_MB = 25;
+const MAX_UPLOAD_FILE_MB = 50;
 const ALLOWED_UPLOAD_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
 const getCartStorageKey = (userId) => (

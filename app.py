@@ -222,6 +222,8 @@ DISABLE_HEAVY_CLUSTERING = os.getenv("DISABLE_HEAVY_CLUSTERING", "false").strip(
 ENABLE_CLOUD_UPLOADS = os.getenv("ENABLE_CLOUD_UPLOADS", "false").strip().lower() == "true"
 THUMBNAIL_SIZE = (300, 300)  # Max dimensions for thumbnails
 MAX_UPLOAD_LONG_EDGE = int(os.getenv("MAX_UPLOAD_LONG_EDGE", "2048"))
+MAX_UPLOAD_FILE_MB = int(os.getenv("MAX_UPLOAD_FILE_MB", "50"))
+MAX_UPLOAD_FILE_BYTES = MAX_UPLOAD_FILE_MB * 1024 * 1024
 
 CLUSTER_GAME_ID = 101
 CLUSTER_SCHOOL = "Homewood Flossmoor"
@@ -1226,6 +1228,15 @@ def _normalize_uploaded_file(file_storage, suffix):
         return out, content_type
 
 
+def _file_storage_size_bytes(file_storage):
+    stream = file_storage.stream
+    current = stream.tell()
+    stream.seek(0, os.SEEK_END)
+    size = stream.tell()
+    stream.seek(current, os.SEEK_SET)
+    return int(size)
+
+
 def _save_uploaded_files(files, photographer, school, sport, game_id, price=None, include_in_package=True, uploader_id=None):
     """Persist incoming photos and append metadata entries."""
     PHOTO_DIR.mkdir(parents=True, exist_ok=True)
@@ -1243,6 +1254,9 @@ def _save_uploaded_files(files, photographer, school, sport, game_id, price=None
 
     for idx, file in enumerate(files, start=1):
         if not file or not file.filename:
+            continue
+        if _file_storage_size_bytes(file) > MAX_UPLOAD_FILE_BYTES:
+            skipped += 1
             continue
 
         clean_name = secure_filename(file.filename)
@@ -1315,6 +1329,9 @@ def _save_uploaded_files_to_s3(
 
     for idx, file in enumerate(files, start=1):
         if not file or not file.filename:
+            continue
+        if _file_storage_size_bytes(file) > MAX_UPLOAD_FILE_BYTES:
+            skipped += 1
             continue
 
         clean_name = secure_filename(file.filename)
@@ -2404,6 +2421,8 @@ def api_uploads_complete():
     manifest = _load_uploads_manifest()
     uploaded_files = []
     file_records = []
+    oversized = 0
+    s3 = _s3_client()
 
     for raw in uploads[:200]:
         if not isinstance(raw, dict):
@@ -2412,6 +2431,15 @@ def api_uploads_complete():
         filename = _safe_storage_name(raw.get("filename") or Path(key).name)
         if not key or not filename:
             continue
+        if s3 is not None:
+            try:
+                meta = s3.head_object(Bucket=S3_UPLOADS_BUCKET, Key=key)
+                if int(meta.get("ContentLength") or 0) > MAX_UPLOAD_FILE_BYTES:
+                    oversized += 1
+                    s3.delete_object(Bucket=S3_UPLOADS_BUCKET, Key=key)
+                    continue
+            except Exception as exc:
+                return jsonify({"error": f"Failed to validate uploaded file size for {filename}: {exc}"}), 502
         uploaded_files.append(filename)
         file_records.append({"filename": filename, "key": key})
         manifest.append({
@@ -2429,7 +2457,7 @@ def api_uploads_complete():
         })
 
     if not uploaded_files:
-        return jsonify({"error": "No valid uploads provided"}), 400
+        return jsonify({"error": f"No valid uploads provided. Max file size is {MAX_UPLOAD_FILE_MB}MB.", "oversized_count": oversized}), 400
 
     _save_uploads_manifest(manifest)
     job = _new_cluster_job(
@@ -2459,6 +2487,7 @@ def api_uploads_complete():
         "ok": True,
         "uploaded_count": len(uploaded_files),
         "uploaded_files": uploaded_files,
+        "oversized_count": oversized,
         "job_id": job["id"],
         "clustering_started": bool(ok),
     })
@@ -2543,7 +2572,7 @@ def api_photographer_upload():
 
         if not uploaded:
             return jsonify({
-                "error": "No supported image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp",
+                "error": f"No valid image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp, max {MAX_UPLOAD_FILE_MB}MB each.",
                 "uploaded_count": 0,
                 "skipped_count": skipped,
             }), 400
@@ -2595,7 +2624,7 @@ def api_photographer_upload():
     )
     if not uploaded:
         return jsonify({
-            "error": "No supported image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp",
+            "error": f"No valid image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp, max {MAX_UPLOAD_FILE_MB}MB each.",
             "uploaded_count": 0,
             "skipped_count": skipped,
         }), 400
@@ -2646,7 +2675,7 @@ def api_game_upload(game_id):
 
         if not uploaded:
             return jsonify({
-                "error": "No supported image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp",
+                "error": f"No valid image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp, max {MAX_UPLOAD_FILE_MB}MB each.",
                 "uploaded_count": 0,
                 "skipped_count": skipped,
             }), 400
@@ -2698,7 +2727,7 @@ def api_game_upload(game_id):
     )
     if not uploaded:
         return jsonify({
-            "error": "No supported image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp",
+            "error": f"No valid image files were uploaded. Allowed extensions: .jpg, .jpeg, .png, .webp, max {MAX_UPLOAD_FILE_MB}MB each.",
             "uploaded_count": 0,
             "skipped_count": skipped,
         }), 400
