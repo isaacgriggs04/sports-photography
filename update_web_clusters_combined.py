@@ -1,9 +1,7 @@
 import argparse
 import json
 import os
-import re
 import sys
-import traceback
 from pathlib import Path
 
 import cv2
@@ -42,9 +40,6 @@ def parse_args():
     p.add_argument("--assign-face-cos", type=float, default=0.62)
     p.add_argument("--assign-margin", type=float, default=0.02)
     p.add_argument("--assign-no-face-combined-cos", type=float, default=0.62)
-    p.add_argument("--number-conf-thres", type=float, default=0.7)
-    p.add_argument("--number-match-bonus", type=float, default=0.03)
-    p.add_argument("--number-mismatch-penalty", type=float, default=0.03)
     p.add_argument("--conf-threshold", type=float, default=0.25)
     p.add_argument("--output-json", default="athlete_groups.json")
     p.add_argument("--output-crops-dir", default="athlete_groups")
@@ -63,13 +58,8 @@ def _safe_merge_labels(
     labels: np.ndarray,
     combined_embeddings: np.ndarray,
     face_embeddings: list,
-    jersey_numbers: list,
-    jersey_confs: list,
     combined_cos_threshold: float,
     face_cos_threshold: float,
-    number_conf_thres: float,
-    number_match_bonus: float,
-    number_mismatch_penalty: float,
 ) -> np.ndarray:
     """
     Merge micro-clusters conservatively:
@@ -93,21 +83,6 @@ def _safe_merge_labels(
         else:
             face_centroids[cid] = None
 
-    cluster_number = {}
-    for cid in unique:
-        nums = []
-        for i in members[cid]:
-            n = jersey_numbers[i]
-            c = jersey_confs[i]
-            if n is not None and c is not None and c >= number_conf_thres:
-                nums.append(n)
-        if not nums:
-            cluster_number[cid] = None
-        else:
-            # Majority number in this micro-cluster.
-            cluster_number[cid] = max(set(nums), key=nums.count)
-
-    # Union-find over cluster ids.
     parent = {cid: cid for cid in unique}
 
     def find(x):
@@ -121,7 +96,6 @@ def _safe_merge_labels(
         if ra != rb:
             parent[rb] = ra
 
-    # Consider most similar centroid pairs first.
     pairs = []
     for i, a in enumerate(unique):
         for b in unique[i + 1 :]:
@@ -133,7 +107,6 @@ def _safe_merge_labels(
         if sim < combined_cos_threshold:
             continue
 
-        # At least one side should have decent support (protect against singleton drift).
         if max(len(members[a]), len(members[b])) < 2:
             continue
 
@@ -144,20 +117,8 @@ def _safe_merge_labels(
             if face_sim < face_cos_threshold:
                 continue
 
-        # Soft number signal: confident match lowers merge threshold slightly.
-        na = cluster_number.get(a)
-        nb = cluster_number.get(b)
-        local_threshold = combined_cos_threshold
-        if na is not None and nb is not None and na == nb:
-            local_threshold = max(0.0, combined_cos_threshold - number_match_bonus)
-        elif na is not None and nb is not None and na != nb:
-            local_threshold = min(0.99, combined_cos_threshold + number_mismatch_penalty)
-        if sim < local_threshold:
-            continue
-
         union(a, b)
 
-    # Build new labels.
     root_to_new = {}
     next_label = 0
     merged = labels.copy()
@@ -175,15 +136,10 @@ def _prototype_reassign_labels(
     labels: np.ndarray,
     combined_embeddings: np.ndarray,
     face_embeddings: list,
-    jersey_numbers: list,
-    jersey_confs: list,
     assign_combined_cos: float,
     assign_face_cos: float,
     assign_margin: float,
     assign_no_face_combined_cos: float,
-    number_conf_thres: float,
-    number_match_bonus: float,
-    number_mismatch_penalty: float,
 ) -> np.ndarray:
     """
     Reassign only currently-unclustered detections to existing clusters if:
@@ -207,19 +163,6 @@ def _prototype_reassign_labels(
         else:
             face_centroids[cid] = None
 
-    cluster_number = {}
-    for cid in cluster_ids:
-        nums = []
-        for i in members[cid]:
-            n = jersey_numbers[i]
-            c = jersey_confs[i]
-            if n is not None and c is not None and c >= number_conf_thres:
-                nums.append(n)
-        if not nums:
-            cluster_number[cid] = None
-        else:
-            cluster_number[cid] = max(set(nums), key=nums.count)
-
     out = labels.copy()
     unclustered = np.where(labels == -1)[0].tolist()
     for i in unclustered:
@@ -231,34 +174,15 @@ def _prototype_reassign_labels(
         best_sim, best_cid = sims[0]
         second_sim = sims[1][0] if len(sims) > 1 else -1.0
 
-        # Strict combined+margin gates.
         min_combined = assign_combined_cos
         if face_embeddings[i] is None:
             min_combined = assign_no_face_combined_cos
-
-        # Soft number signal:
-        # - confident match allows a small threshold relaxation
-        # - mismatch does not block (to avoid micro-splitting on OCR errors)
-        item_num = jersey_numbers[i]
-        item_num_conf = jersey_confs[i]
-        target_num = cluster_number.get(best_cid)
-        if (
-            item_num is not None
-            and item_num_conf is not None
-            and item_num_conf >= number_conf_thres
-            and target_num is not None
-        ):
-            if item_num == target_num:
-                min_combined = max(0.0, min_combined - number_match_bonus)
-            else:
-                min_combined = min(0.99, min_combined + number_mismatch_penalty)
 
         if best_sim < min_combined:
             continue
         if (best_sim - second_sim) < assign_margin:
             continue
 
-        # If face exists and target has face centroid, require face agreement.
         item_face = face_embeddings[i]
         centroid_face = face_centroids.get(best_cid)
         if item_face is not None and centroid_face is not None:
@@ -269,131 +193,6 @@ def _prototype_reassign_labels(
         out[i] = best_cid
 
     return out
-
-
-def _build_number_ocr():
-    # PaddleOCR requires PaddlePaddle at runtime, and its init kwargs differ across 2.x/3.x.
-    try:
-        import paddle
-        from paddleocr import PaddleOCR
-
-        print(
-            f"[JERSEY OCR] Initializing PaddleOCR with paddle={getattr(paddle, '__version__', 'unknown')}",
-            flush=True,
-        )
-        try:
-            # Newer PaddleOCR init surface.
-            return PaddleOCR(
-                lang="en",
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                use_textline_orientation=False,
-            )
-        except TypeError as exc:
-            if "unexpected keyword" not in str(exc):
-                raise
-            print(f"[JERSEY OCR] Falling back to PaddleOCR legacy init: {exc}", flush=True)
-            return PaddleOCR(
-                lang="en",
-                use_angle_cls=False,
-                show_log=False,
-            )
-    except Exception as exc:
-        print(f"Jersey OCR disabled: {type(exc).__name__}: {exc}\n{traceback.format_exc()}", flush=True)
-        return None
-
-
-def _jersey_roi(body_crop_bgr: np.ndarray) -> np.ndarray:
-    """Take center torso region where jersey numbers are most likely visible."""
-    h, w = body_crop_bgr.shape[:2]
-    x1 = int(0.15 * w)
-    x2 = int(0.85 * w)
-    y1 = int(0.20 * h)
-    y2 = int(0.82 * h)
-    if x2 <= x1 or y2 <= y1:
-        return body_crop_bgr
-    return body_crop_bgr[y1:y2, x1:x2]
-
-
-def _extract_number_candidates_from_ocr_output(ocr_output):
-    """
-    Yield (text, score) pairs from PaddleOCR outputs across different formats.
-    Supports both old ocr() and newer predict() style results.
-    """
-    candidates = []
-    if ocr_output is None:
-        return candidates
-
-    # Newer predict() style: list of dicts with rec_texts / rec_scores.
-    if isinstance(ocr_output, list):
-        for item in ocr_output:
-            if isinstance(item, dict):
-                texts = item.get("rec_texts", [])
-                scores = item.get("rec_scores", [])
-                for t, s in zip(texts, scores):
-                    candidates.append((str(t), float(s)))
-            elif isinstance(item, list):
-                # Older style: [[box, (text, score)], ...]
-                for sub in item:
-                    if (
-                        isinstance(sub, list)
-                        and len(sub) >= 2
-                        and isinstance(sub[1], (list, tuple))
-                        and len(sub[1]) >= 2
-                    ):
-                        candidates.append((str(sub[1][0]), float(sub[1][1])))
-    return candidates
-
-
-def extract_jersey_number(body_crop_bgr: np.ndarray, number_ocr):
-    """
-    OCR jersey number from body crop.
-    Returns (number_text_or_None, confidence_or_None).
-    """
-    if number_ocr is None:
-        return None, None
-
-    roi = _jersey_roi(body_crop_bgr)
-    if roi.size == 0:
-        return None, None
-
-    # Speed + robustness: downscale oversized crops before OCR.
-    h, w = roi.shape[:2]
-    max_side = max(h, w)
-    if max_side > 960:
-        scale = 960.0 / max_side
-        new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-        try:
-            roi = cv2.resize(roi, new_size, interpolation=cv2.INTER_AREA)
-        except Exception:
-            pil_roi = Image.fromarray(roi[:, :, ::-1].copy())
-            roi = np.asarray(pil_roi.resize(new_size, Image.Resampling.BILINEAR), dtype=np.uint8)[:, :, ::-1].copy()
-
-    # Use predict() to avoid deprecated warnings.
-    try:
-        out = number_ocr.predict(roi)
-    except Exception as exc:
-        print(f"Jersey OCR inference failed: {exc}")
-        return None, None
-    candidates = _extract_number_candidates_from_ocr_output(out)
-    if not candidates:
-        return None, None
-
-    # Keep strongest candidate containing 1-3 digits.
-    best_num = None
-    best_conf = -1.0
-    for text, conf in candidates:
-        match = re.findall(r"\d{1,3}", text)
-        if not match:
-            continue
-        # Pick first digit group; typical jersey is short integer.
-        num = match[0]
-        if conf > best_conf:
-            best_conf = conf
-            best_num = num
-    if best_num is None:
-        return None, None
-    return best_num, float(best_conf)
 
 
 def main():
@@ -418,12 +217,8 @@ def main():
 
     yolo = YOLO(args.yolo_model)
     face_app = _build_face_app()
-    number_ocr = _build_number_ocr()
     face_enabled = face_app is not None
-    jersey_ocr_enabled = number_ocr is not None
     if not face_enabled:
-        # Without face embeddings, body-only vectors are more error-prone on similar uniforms.
-        # Tighten merge/assign gates to reduce catastrophic over-merge.
         args.merge_combined_cos = max(args.merge_combined_cos, 0.62)
         args.assign_combined_cos = max(args.assign_combined_cos, 0.72)
         args.assign_no_face_combined_cos = max(args.assign_no_face_combined_cos, 0.74)
@@ -434,19 +229,14 @@ def main():
             f"assign_no_face_combined_cos={args.assign_no_face_combined_cos}",
             flush=True,
         )
-    if not jersey_ocr_enabled:
-        print("[CLUSTER MODE] Jersey OCR unavailable; number-based merge bonus disabled.", flush=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     body_model, body_preprocess = _build_body_model(device)
 
     records = []
     embeddings = []
     face_embeddings = []
-    jersey_numbers = []
-    jersey_confs = []
     crops = []
     face_detection_count = 0
-    jersey_detection_count = 0
 
     print(f"Processing {len(image_paths)} images with combined face+body embeddings...")
     for idx, image_path in enumerate(image_paths, start=1):
@@ -497,23 +287,15 @@ def main():
             zero_face = np.zeros_like(body_n, dtype=np.float32)
             emb = normalize(np.concatenate([zero_face, body_n], axis=0))
 
-        jersey_num, jersey_conf = extract_jersey_number(crop, number_ocr)
-        if jersey_num is not None:
-            jersey_detection_count += 1
-
         records.append(
             {
                 "photo": image_path.name,
                 "bbox_xyxy": [float(v) for v in det["bbox_xyxy"]],
                 "confidence": float(det["confidence"]),
-                "jersey_number": jersey_num,
-                "jersey_confidence": jersey_conf,
             }
         )
         embeddings.append(emb)
         face_embeddings.append(face_n)
-        jersey_numbers.append(jersey_num)
-        jersey_confs.append(jersey_conf)
         crops.append(crop)
 
     if not embeddings:
@@ -536,27 +318,17 @@ def main():
         labels=initial_labels,
         combined_embeddings=X,
         face_embeddings=face_embeddings,
-        jersey_numbers=jersey_numbers,
-        jersey_confs=jersey_confs,
         combined_cos_threshold=args.merge_combined_cos,
         face_cos_threshold=args.merge_face_cos,
-        number_conf_thres=args.number_conf_thres,
-        number_match_bonus=args.number_match_bonus,
-        number_mismatch_penalty=args.number_mismatch_penalty,
     )
     labels = _prototype_reassign_labels(
         labels=labels,
         combined_embeddings=X,
         face_embeddings=face_embeddings,
-        jersey_numbers=jersey_numbers,
-        jersey_confs=jersey_confs,
         assign_combined_cos=args.assign_combined_cos,
         assign_face_cos=args.assign_face_cos,
         assign_margin=args.assign_margin,
         assign_no_face_combined_cos=args.assign_no_face_combined_cos,
-        number_conf_thres=args.number_conf_thres,
-        number_match_bonus=args.number_match_bonus,
-        number_mismatch_penalty=args.number_mismatch_penalty,
     )
 
     cluster_ids = sorted([int(l) for l in set(labels.tolist()) if l != -1])
@@ -571,9 +343,7 @@ def main():
             "clustered_detections": int(np.sum(labels != -1)),
             "clusters": len(cluster_ids),
             "face_enabled": face_enabled,
-            "jersey_ocr_enabled": jersey_ocr_enabled,
             "face_detections": face_detection_count,
-            "jersey_detections": jersey_detection_count,
             "method": "combined_face_body_adaptive",
             "clusterer": "hdbscan",
             "metric": "euclidean",
@@ -586,9 +356,6 @@ def main():
             "assign_face_cos": args.assign_face_cos,
             "assign_margin": args.assign_margin,
             "assign_no_face_combined_cos": args.assign_no_face_combined_cos,
-            "number_conf_thres": args.number_conf_thres,
-            "number_match_bonus": args.number_match_bonus,
-            "number_mismatch_penalty": args.number_mismatch_penalty,
         },
     }
 

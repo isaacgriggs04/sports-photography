@@ -33,7 +33,6 @@ RUN pip install --no-cache-dir --force-reinstall \
     "scikit-learn==1.5.2" \
     "hdbscan==0.8.39"
 RUN python -c "import hdbscan, numpy, scipy, sklearn; print({'numpy': numpy.__version__, 'scipy': scipy.__version__, 'sklearn': sklearn.__version__, 'hdbscan': getattr(hdbscan, '__version__', 'unknown')})"
-RUN python -c "import paddle, paddleocr; print({'paddle': paddle.__version__, 'paddleocr': getattr(paddleocr, '__version__', 'unknown')})"
 
 COPY worker/cloud_cluster_worker.py /app/worker/cloud_cluster_worker.py
 COPY update_web_clusters_combined.py /app/update_web_clusters_combined.py
