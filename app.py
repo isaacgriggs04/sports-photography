@@ -1674,8 +1674,6 @@ def _append_photos_as_unclustered(photo_names):
             "photo": name,
             "bbox_xyxy": [],
             "confidence": 1.0 if matched_cluster else 0.0,
-            "jersey_number": None,
-            "jersey_confidence": None,
         }
 
         if matched_cluster:
