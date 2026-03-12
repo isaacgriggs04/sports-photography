@@ -2479,8 +2479,13 @@ def api_uploads_complete():
         _append_photos_as_unclustered(uploaded_files)
         _set_cluster_job_status(
             job["id"],
-            "completed",
-            {"queue": "none", "queue_error": queue_err, "fallback": "unknown_cluster"},
+            "failed",
+            {
+                "queue": "none",
+                "queue_error": queue_err,
+                "fallback": "unknown_cluster",
+                "error": f"Cloud clustering was not queued: {queue_err}",
+            },
         )
 
     return jsonify({
@@ -2536,6 +2541,21 @@ def api_internal_job_update(job_id):
             status = "failed"
             print(f"Worker result ingest failed for {job_id}: {ingest_extra}", flush=True)
             extra.update(ingest_extra)
+
+    if status == "failed":
+        job_files = []
+        for f in (job or {}).get("files", []):
+            if isinstance(f, dict):
+                filename = (f.get("filename") or "").strip()
+                if filename:
+                    job_files.append(filename)
+        if job_files:
+            existing = _load_cluster_data()
+            missing = [name for name in job_files if name not in _all_cluster_photo_names(existing)]
+            if missing:
+                _append_photos_as_unclustered(missing)
+                print(f"Cloud job {job_id} failed; added {len(missing)} photo(s) as unclustered.", flush=True)
+
     _set_cluster_job_status(job_id, status, extra=extra)
     return jsonify({"ok": True})
 
@@ -2595,8 +2615,13 @@ def api_photographer_upload():
             _append_photos_as_unclustered(uploaded)
             _set_cluster_job_status(
                 job["id"],
-                "completed",
-                {"queue": "none", "queue_error": queue_err, "fallback": "unknown_cluster"},
+                "failed",
+                {
+                    "queue": "none",
+                    "queue_error": queue_err,
+                    "fallback": "unknown_cluster",
+                    "error": f"Cloud clustering was not queued: {queue_err}",
+                },
             )
 
         return jsonify(
@@ -2698,8 +2723,13 @@ def api_game_upload(game_id):
             _append_photos_as_unclustered(uploaded)
             _set_cluster_job_status(
                 job["id"],
-                "completed",
-                {"queue": "none", "queue_error": queue_err, "fallback": "unknown_cluster"},
+                "failed",
+                {
+                    "queue": "none",
+                    "queue_error": queue_err,
+                    "fallback": "unknown_cluster",
+                    "error": f"Cloud clustering was not queued: {queue_err}",
+                },
             )
 
         clusters = api_game_clusters(game_id).get_json()
@@ -3232,7 +3262,8 @@ def stripe_webhook():
     photo_names = [n.strip() for n in photo_names_str.split(",") if n.strip()]
     # Prefer Stripe-collected email, then our metadata (for signed-in user)
     email = (session.get("customer_email") or "").strip() or metadata.get("customer_email", "").strip()
-    clerk_user_id = metadata.get("clerk_user_id", "").strip() or None
+    clerk_user_id_raw = (metadata.get("clerk_user_id", "") or "").strip()
+    clerk_user_id = clerk_user_id_raw if clerk_user_id_raw else None
     amount_total = session.get("amount_total") or 0
 
     if not photo_names:
@@ -3300,7 +3331,8 @@ def download_purchased_photo(photo_name):
     if not user_id:
         return jsonify({"error": "Unauthorized"}), 401
     for p in purchases:
-        if p.get("clerk_user_id") == user_id and photo_name in (p.get("photo_names") or []):
+        purchase_user = (p.get("clerk_user_id") or "").strip() or None
+        if purchase_user == user_id and photo_name in (p.get("photo_names") or []):
             path = PHOTO_DIR / photo_name
             if path.exists():
                 return send_file(
