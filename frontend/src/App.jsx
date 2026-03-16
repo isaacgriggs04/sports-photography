@@ -601,22 +601,15 @@ function App() {
         alert(err.error || 'Download failed. You may need to sign in again.');
         return;
       }
-      let blob;
       const contentType = res.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         const data = await res.json();
         if (data.download_url) {
-          const s3Res = await fetch(data.download_url);
-          if (!s3Res.ok) {
-            alert('Download failed. Please try again.');
-            return;
-          }
-          blob = await s3Res.blob();
+          window.open(data.download_url, '_blank');
+          return;
         }
       }
-      if (!blob) {
-        blob = await res.blob();
-      }
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

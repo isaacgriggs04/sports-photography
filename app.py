@@ -642,6 +642,27 @@ def _build_s3_get_url_for_key(key, expires=900):
         return ""
 
 
+def _build_s3_download_url(key, filename, expires=900):
+    """Like _build_s3_get_url_for_key but forces Content-Disposition: attachment."""
+    if not key or not S3_UPLOADS_BUCKET:
+        return ""
+    s3 = _s3_client()
+    if s3 is None:
+        return ""
+    try:
+        return s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": S3_UPLOADS_BUCKET,
+                "Key": key,
+                "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            },
+            ExpiresIn=int(expires),
+        )
+    except Exception:
+        return ""
+
+
 def _all_cluster_photo_names(cluster_data):
     names = {
         det.get("photo")
@@ -3390,7 +3411,7 @@ def download_purchased_photo(photo_name):
                 )
             entry = _manifest_entry_for_photo(photo_name)
             key = (entry or {}).get("storage_key")
-            signed_url = _build_s3_get_url_for_key(key, expires=300)
+            signed_url = _build_s3_download_url(key, photo_name, expires=300)
             if signed_url:
                 return jsonify({"download_url": signed_url})
             return jsonify({"error": "Photo file not found"}), 404
