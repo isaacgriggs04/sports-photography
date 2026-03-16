@@ -2864,7 +2864,7 @@ def create_checkout_session():
             payment_method_types=["card"],
             line_items=line_items,
             mode="payment",
-            success_url=f"{origin}?purchase=success&photos={','.join(photo_names)}",
+            success_url=f"{origin}?purchase=success&session_id={{CHECKOUT_SESSION_ID}}&photos={','.join(photo_names)}",
             cancel_url=f"{origin}?purchase=cancelled",
             metadata=metadata,
             customer_email=customer_email if customer_email else None,
@@ -3320,6 +3320,53 @@ def stripe_webhook():
         _save_notifications(notifications)
 
     return jsonify({"ok": True})
+
+
+@app.route("/api/verify-purchase", methods=["POST"])
+@require_auth
+def api_verify_purchase():
+    """Verify a Stripe checkout session and record the purchase if payment succeeded."""
+    user_id = getattr(request, "clerk_user_id", None)
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json() or {}
+    session_id = (data.get("session_id") or "").strip()
+    if not session_id:
+        return jsonify({"error": "Missing session_id"}), 400
+
+    purchases = _load_purchases()
+    for p in purchases:
+        if p.get("id") == session_id:
+            return jsonify({"ok": True, "already_recorded": True})
+
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except Exception as exc:
+        return jsonify({"error": f"Could not verify session: {exc}"}), 502
+
+    if session.get("payment_status") != "paid":
+        return jsonify({"error": "Payment not completed"}), 402
+
+    metadata = session.get("metadata") or {}
+    photo_names_str = metadata.get("photo_names", "")
+    photo_names = [n.strip() for n in photo_names_str.split(",") if n.strip()]
+    if not photo_names:
+        return jsonify({"error": "No photos in session metadata"}), 400
+
+    email = (session.get("customer_email") or "").strip() or metadata.get("customer_email", "").strip()
+    amount_total = session.get("amount_total") or 0
+
+    purchase = {
+        "id": session_id,
+        "email": email,
+        "clerk_user_id": user_id,
+        "photo_names": photo_names,
+        "amount_cents": amount_total,
+        "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    purchases.append(purchase)
+    _save_purchases(purchases)
+    return jsonify({"ok": True, "photo_names": photo_names})
 
 
 @app.route("/api/photo/<path:photo_name>/download", methods=["GET"])

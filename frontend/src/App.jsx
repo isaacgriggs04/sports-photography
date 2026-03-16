@@ -302,17 +302,33 @@ function App() {
     }
   }, []);
 
-  // Read purchase success from URL after Stripe redirect
+  // Read purchase success from URL after Stripe redirect and verify with backend
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const purchase = params.get('purchase');
     const photosParam = params.get('photos');
+    const sessionId = params.get('session_id');
     if (purchase === 'success' && photosParam) {
       const names = photosParam.split(',').map(s => s.trim()).filter(Boolean);
       if (names.length > 0) {
         setPurchaseSuccessPhotos(names);
         setCart(prev => prev.filter(p => !names.includes(p.image_url)));
         window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        if (sessionId) {
+          (async () => {
+            try {
+              const token = await getToken();
+              if (!token) return;
+              await fetch(`${API_BASE}/verify-purchase`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ session_id: sessionId }),
+              });
+            } catch {
+              // Verification failed silently; webhook may still record it
+            }
+          })();
+        }
       }
     }
   }, []);
@@ -848,13 +864,19 @@ function App() {
         return;
       }
       const job = await res.json();
+      if (job.queue === 'none' || job.fallback === 'unknown_cluster' || job.queue_error) {
+        await refreshGameClusters(gameId);
+        setUploadMessage('Photos uploaded successfully! Auto-sorting is temporarily unavailable, so your photos appear under "Unknown" for now.');
+        return;
+      }
       if (job.status === 'completed') {
         await refreshGameClusters(gameId);
         setUploadMessage('Photos uploaded and cloud clustering completed.');
         return;
       }
       if (job.status === 'failed') {
-        setUploadMessage(`Photos uploaded, but cloud clustering failed${job.error ? `: ${job.error}` : '.'}`);
+        await refreshGameClusters(gameId);
+        setUploadMessage('Photos uploaded successfully! Auto-sorting had an issue, so your photos appear under "Unknown" for now.');
         return;
       }
       if (attemptsLeft > 0) {
