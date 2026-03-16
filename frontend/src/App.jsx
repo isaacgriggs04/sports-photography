@@ -601,23 +601,29 @@ function App() {
         alert(err.error || 'Download failed. You may need to sign in again.');
         return;
       }
+      let blob;
       const contentType = res.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         const data = await res.json();
         if (data.download_url) {
-          const a = document.createElement('a');
-          a.href = data.download_url;
-          a.download = photoName;
-          a.click();
-          return;
+          const s3Res = await fetch(data.download_url);
+          if (!s3Res.ok) {
+            alert('Download failed. Please try again.');
+            return;
+          }
+          blob = await s3Res.blob();
         }
       }
-      const blob = await res.blob();
+      if (!blob) {
+        blob = await res.blob();
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = photoName;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
