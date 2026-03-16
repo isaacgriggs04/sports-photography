@@ -3392,7 +3392,7 @@ def download_purchased_photo(photo_name):
             key = (entry or {}).get("storage_key")
             signed_url = _build_s3_get_url_for_key(key, expires=300)
             if signed_url:
-                return redirect(signed_url, code=302)
+                return jsonify({"download_url": signed_url})
             return jsonify({"error": "Photo file not found"}), 404
     return jsonify({"error": "You do not have access to this photo"}), 403
 

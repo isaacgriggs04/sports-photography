@@ -91,9 +91,13 @@ def _require_env(name, value):
         raise RuntimeError(f"Missing required env var: {name}")
 
 
-def _notify_job(job_id, status, payload=None):
+def _notify_job(job_id, status, payload=None, *, strict=False):
     if not WORKER_SHARED_SECRET:
-        return
+        msg = f"Worker callback skipped for {job_id}: WORKER_SHARED_SECRET is not configured"
+        if strict:
+            raise RuntimeError(msg)
+        print(msg, flush=True)
+        return False
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {WORKER_SHARED_SECRET}",
@@ -102,9 +106,22 @@ def _notify_job(job_id, status, payload=None):
     if payload:
         body.update(payload)
     try:
-        requests.post(f"{API_INTERNAL_BASE}/api/internal/jobs/{job_id}", headers=headers, json=body, timeout=15)
+        resp = requests.post(f"{API_INTERNAL_BASE}/api/internal/jobs/{job_id}", headers=headers, json=body, timeout=15)
+        if resp.status_code >= 400:
+            msg = (
+                f"Job status callback failed for {job_id}: "
+                f"status={resp.status_code} body={(resp.text or '')[:500]}"
+            )
+            if strict:
+                raise RuntimeError(msg)
+            print(msg, flush=True)
+            return False
+        return True
     except Exception as exc:
-        print(f"Job status callback failed for {job_id}: {exc}")
+        if strict:
+            raise RuntimeError(f"Job status callback failed for {job_id}: {exc}") from exc
+        print(f"Job status callback failed for {job_id}: {exc}", flush=True)
+        return False
 
 
 def _download_job_images(s3, files, workdir):
@@ -246,7 +263,7 @@ def main():
                         "result_bucket": S3_UPLOADS_BUCKET,
                         "incremental_groups_s3_key": result_key,
                     }
-                _notify_job(job_id, "completed", {"result": result_payload})
+                _notify_job(job_id, "completed", {"result": result_payload}, strict=True)
 
                 sqs.delete_message(QueueUrl=SQS_CLUSTER_QUEUE_URL, ReceiptHandle=receipt)
             except Exception as exc:

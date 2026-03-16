@@ -601,6 +601,17 @@ function App() {
         alert(err.error || 'Download failed. You may need to sign in again.');
         return;
       }
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.download_url) {
+          const a = document.createElement('a');
+          a.href = data.download_url;
+          a.download = photoName;
+          a.click();
+          return;
+        }
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
